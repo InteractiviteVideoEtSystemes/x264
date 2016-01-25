@@ -1,5 +1,5 @@
 Name:      x264
-Version:   0.6.3
+Version:   %_version
 #Ne pas enlever le .ives a la fin de la release !
 #Cela est utilise par les scripts de recherche de package.
 Release:   1.ives%{?dist}
@@ -32,15 +32,12 @@ echo "############################# Clean"
 echo Clean du repertoire $RPM_BUILD_ROOT
 [ "$RPM_BUILD_ROOT" != "/" ] && rm -rf "$RPM_BUILD_ROOT"
 
-%prep
-svn export --force http://svn.ives.fr/svn-libs-dev/asterisk/libsmedia/%name/tags/%version %name
-
 %build
 echo "Build"
 echo "############################# Build"
 echo $PWD
 cd %name
-%configure --enable-shared --enable-static --enable-pic --disable-thread 
+%configure --enable-shared --enable-static --enable-pic --disable-thread --disable-ffms --disable-swscale 
 make
 cd ..
 echo $PWD
