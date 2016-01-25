@@ -35,7 +35,10 @@ echo Clean du repertoire $RPM_BUILD_ROOT
 echo "Build"
 echo "############################# Build"
 echo $PWD
+cd %_topdir
+cd ..
 %configure --enable-shared --enable-static --enable-pic --disable-thread --disable-ffms --disable-swscale 
+make clean
 make
 
 %install
@@ -44,6 +47,8 @@ echo Clean du repertoire $RPM_BUILD_ROOT
 [ "$RPM_BUILD_ROOT" != "/" ] && rm -rf "$RPM_BUILD_ROOT"
 echo "Install" $PWD
 mkdir -p $RPM_BUILD_ROOT
+cd %_topdir
+cd ..
 %makeinstall
 
 %files
