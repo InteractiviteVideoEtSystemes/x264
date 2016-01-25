@@ -1,4 +1,4 @@
-#!/usr/bin/ksh
+#!/bin/bash
 
 #Nom du paquetage
 PROJET=x264
