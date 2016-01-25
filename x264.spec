@@ -35,11 +35,8 @@ echo Clean du repertoire $RPM_BUILD_ROOT
 echo "Build"
 echo "############################# Build"
 echo $PWD
-cd %name
 %configure --enable-shared --enable-static --enable-pic --disable-thread --disable-ffms --disable-swscale 
 make
-cd ..
-echo $PWD
 
 %install
 echo "############################# Install"
@@ -47,8 +44,6 @@ echo Clean du repertoire $RPM_BUILD_ROOT
 [ "$RPM_BUILD_ROOT" != "/" ] && rm -rf "$RPM_BUILD_ROOT"
 echo "Install" $PWD
 mkdir -p $RPM_BUILD_ROOT
-chmod +x ./%name/install.ksh
-cd %name
 %makeinstall
 
 %files
