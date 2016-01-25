@@ -10,7 +10,6 @@ License: GPL
 URL:       http://www.videolan.org/developers/x264.html
 BuildRoot:  %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 #BuildRequires: 
-Requires:  
 
 %description
 Utility and library for encoding H264/AVC video streams. This version includes
