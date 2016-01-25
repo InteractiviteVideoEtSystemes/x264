@@ -2,7 +2,7 @@
 
 #Nom du paquetage
 PROJET=x264
-VERSION=0.6.3
+VERSION=0.7.0
 #Repertoire temporaire utiliser pour preparer les packages
 TEMPDIR=/tmp
 
