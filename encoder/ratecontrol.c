@@ -27,7 +27,6 @@
  * For more information, contact us at licensing@x264.com.
  *****************************************************************************/
 
-#define _ISOC99_SOURCE
 #undef NDEBUG // always check asserts, the speed effect is far too small to disable them
 
 #include "common/common.h"
@@ -566,11 +565,7 @@ int x264_macroblock_tree_read( x264_t *h, x264_frame_t *frame, float *quant_offs
         }
 
         float *dst = rc->mbtree.rescale_enabled ? rc->mbtree.scale_buffer[0] : frame->f_qp_offset;
-        for( int i = 0; i < rc->mbtree.src_mb_count; i++ )
-        {
-            int16_t qp_fix8 = endian_fix16( rc->mbtree.qp_buffer[rc->mbtree.qpbuf_pos][i] );
-            dst[i] = qp_fix8 * (1.f/256.f);
-        }
+        h->mc.mbtree_fix8_unpack( dst, rc->mbtree.qp_buffer[rc->mbtree.qpbuf_pos], rc->mbtree.src_mb_count );
         if( rc->mbtree.rescale_enabled )
             x264_macroblock_tree_rescale( h, rc, frame->f_qp_offset );
         if( h->frames.b_have_lowres )
@@ -791,7 +786,7 @@ int x264_ratecontrol_new( x264_t *h )
         x264_reduce_fraction64( &num, &denom );
         rc->hrd_multiply_denom = 90000 / num;
 
-        double bits_required = log2( 90000 / rc->hrd_multiply_denom )
+        double bits_required = log2( num )
                              + log2( h->sps->vui.i_time_scale )
                              + log2( h->sps->vui.hrd.i_cpb_size_unscaled );
         if( bits_required >= 63 )
@@ -1101,7 +1096,7 @@ int x264_ratecontrol_new( x264_t *h )
                                     &rce->weight[2][0], &rce->weight[2][1] );
                 if( count == 3 )
                     rce->i_weight_denom[1] = -1;
-                else if ( count != 8 )
+                else if( count != 8 )
                     rce->i_weight_denom[0] = rce->i_weight_denom[1] = -1;
             }
 
@@ -1279,7 +1274,10 @@ static int parse_zones( x264_t *h )
             int i_tok = strcspn( p, "/" );
             p[i_tok] = 0;
             if( parse_zone( h, &h->param.rc.zones[i], p ) )
+            {
+                x264_free( psz_zones );
                 return -1;
+            }
             p += i_tok + 1;
         }
         x264_free( psz_zones );
@@ -1411,6 +1409,15 @@ static void accum_p_qp_update( x264_t *h, float qp )
         rc->accum_p_qp += qp;
 }
 
+void x264_ratecontrol_zone_init( x264_t *h )
+{
+    x264_ratecontrol_t *rc = h->rc;
+    x264_zone_t *zone = get_zone( h, h->fenc->i_frame );
+    if( zone && (!rc->prev_zone || zone->param != rc->prev_zone->param) )
+        x264_encoder_reconfig_apply( h, zone->param );
+    rc->prev_zone = zone;
+}
+
 /* Before encoding a frame, choose a QP for it */
 void x264_ratecontrol_start( x264_t *h, int i_force_qp, int overhead )
 {
@@ -1420,10 +1427,6 @@ void x264_ratecontrol_start( x264_t *h, int i_force_qp, int overhead )
     float q;
 
     x264_emms();
-
-    if( zone && (!rc->prev_zone || zone->param != rc->prev_zone->param) )
-        x264_encoder_reconfig_apply( h, zone->param );
-    rc->prev_zone = zone;
 
     if( h->param.rc.b_stat_read )
     {
@@ -1887,9 +1890,7 @@ int x264_ratecontrol_end( x264_t *h, int bits, int *filler )
         if( h->param.rc.b_mb_tree && h->fenc->b_kept_as_ref && !h->param.rc.b_stat_read )
         {
             uint8_t i_type = h->sh.i_type;
-            /* Values are stored as big-endian FIX8.8 */
-            for( int i = 0; i < h->mb.i_mb_count; i++ )
-                rc->mbtree.qp_buffer[0][i] = endian_fix16( h->fenc->f_qp_offset[i]*256.0 );
+            h->mc.mbtree_fix8_pack( rc->mbtree.qp_buffer[0], h->fenc->f_qp_offset, h->mb.i_mb_count );
             if( fwrite( &i_type, 1, 1, rc->p_mbtree_stat_file_out ) < 1 )
                 goto fail;
             if( fwrite( rc->mbtree.qp_buffer[0], sizeof(uint16_t), h->mb.i_mb_count, rc->p_mbtree_stat_file_out ) < h->mb.i_mb_count )
@@ -2868,7 +2869,7 @@ static int vbv_pass2( x264_t *h, double all_available_bits )
             t0 = 0;
             /* fix overflows */
             adj_min = 1;
-            while(adj_min && find_underflow( h, fills, &t0, &t1, 1 ))
+            while( adj_min && find_underflow( h, fills, &t0, &t1, 1 ) )
             {
                 adj_min = fix_underflow( h, t0, t1, adjustment, qscale_min, qscale_max );
                 t0 = t1;

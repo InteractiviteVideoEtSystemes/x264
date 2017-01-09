@@ -245,7 +245,7 @@ static int mk_write_bin( mk_context *c, unsigned id, const void *data, unsigned 
 {
     CHECK( mk_write_id( c, id ) );
     CHECK( mk_write_size( c, size ) );
-    CHECK( mk_append_context_data( c, data, size ) ) ;
+    CHECK( mk_append_context_data( c, data, size ) );
     return 0;
 }
 
@@ -499,10 +499,10 @@ int mk_close( mk_writer *w, int64_t last_delta )
         ret = -1;
     if( w->wrote_header && x264_is_regular_file( w->fp ) )
     {
-        fseek( w->fp, w->duration_ptr, SEEK_SET );
         int64_t last_frametime = w->def_duration ? w->def_duration : last_delta;
-        int64_t total_duration = w->max_frame_tc+last_frametime;
-        if( mk_write_float_raw( w->root, (float)((double)total_duration / w->timescale) ) < 0 ||
+        int64_t total_duration = w->max_frame_tc + last_frametime;
+        if( fseek( w->fp, w->duration_ptr, SEEK_SET ) ||
+            mk_write_float_raw( w->root, (float)((double)total_duration / w->timescale) ) < 0 ||
             mk_flush_context_data( w->root ) < 0 )
             ret = -1;
     }

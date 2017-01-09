@@ -29,6 +29,10 @@
 #include "common/common.h"
 #include "common/cpu.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 // GCC doesn't align stack variables on ARM, so use .bss
 #if ARCH_ARM
 #undef ALIGNED_16
@@ -254,7 +258,13 @@ void x264_checkasm_stack_clobber( uint64_t clobber, ... );
     uint64_t r = (rand() & 0xffff) * 0x0001000100010001ULL; \
     x264_checkasm_stack_clobber( r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r ); /* max_args+6 */ \
     x264_checkasm_call(( intptr_t(*)())func, &ok, 0, 0, 0, 0, __VA_ARGS__ ); })
-#elif ARCH_X86 || (ARCH_AARCH64 && !defined(__APPLE__)) || ARCH_ARM
+#elif ARCH_AARCH64 && !defined(__APPLE__)
+void x264_checkasm_stack_clobber( uint64_t clobber, ... );
+#define call_a1(func,...) ({ \
+    uint64_t r = (rand() & 0xffff) * 0x0001000100010001ULL; \
+    x264_checkasm_stack_clobber( r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r ); /* max_args+8 */ \
+    x264_checkasm_call(( intptr_t(*)())func, &ok, 0, 0, 0, 0, 0, 0, __VA_ARGS__ ); })
+#elif ARCH_X86 || ARCH_ARM
 #define call_a1(func,...) x264_checkasm_call( (intptr_t(*)())func, &ok, __VA_ARGS__ )
 #else
 #define call_a1 call_c1
@@ -1021,8 +1031,8 @@ static int check_dct( int cpu_ref, int cpu_new )
     x264_zigzag_function_t zigzag_ref[2];
     x264_zigzag_function_t zigzag_asm[2];
 
-    ALIGNED_16( dctcoef level1[64] );
-    ALIGNED_16( dctcoef level2[64] );
+    ALIGNED_ARRAY_16( dctcoef, level1,[64] );
+    ALIGNED_ARRAY_16( dctcoef, level2,[64] );
 
 #define TEST_ZIGZAG_SCAN( name, t1, t2, dct, size ) \
     if( zigzag_asm[interlace].name != zigzag_ref[interlace].name ) \
@@ -1745,6 +1755,60 @@ static int check_mc( int cpu_ref, int cpu_new )
             call_a2( mc_a.mbtree_propagate_list, &h, ref_costsa, mvs, propagate_amount, lowres_costs, bipred_weight, 0, width, list );
         }
     }
+
+    if( mc_a.mbtree_fix8_pack != mc_ref.mbtree_fix8_pack )
+    {
+        set_func_name( "mbtree_fix8_pack" );
+        used_asm = 1;
+        float *fix8_src = (float*)(buf3 + 0x800);
+        uint16_t *dstc = (uint16_t*)buf3;
+        uint16_t *dsta = (uint16_t*)buf4;
+        for( int i = 0; i < 5; i++ )
+        {
+            int count = 256 + i;
+
+            for( int j = 0; j < count; j++ )
+                fix8_src[j] = (int16_t)(rand()) / 256.0f;
+            dsta[count] = 0xAAAA;
+
+            call_c( mc_c.mbtree_fix8_pack, dstc, fix8_src, count );
+            call_a( mc_a.mbtree_fix8_pack, dsta, fix8_src, count );
+
+            if( memcmp( dsta, dstc, count * sizeof(uint16_t) ) || dsta[count] != 0xAAAA )
+            {
+                ok = 0;
+                fprintf( stderr, "mbtree_fix8_pack FAILED\n" );
+                break;
+            }
+        }
+    }
+
+    if( mc_a.mbtree_fix8_unpack != mc_ref.mbtree_fix8_unpack )
+    {
+        set_func_name( "mbtree_fix8_unpack" );
+        used_asm = 1;
+        uint16_t *fix8_src = (uint16_t*)(buf3 + 0x800);
+        float *dstc = (float*)buf3;
+        float *dsta = (float*)buf4;
+        for( int i = 0; i < 5; i++ )
+        {
+            int count = 256 + i;
+
+            for( int j = 0; j < count; j++ )
+                fix8_src[j] = rand();
+            M32( &dsta[count] ) = 0xAAAAAAAA;
+
+            call_c( mc_c.mbtree_fix8_unpack, dstc, fix8_src, count );
+            call_a( mc_a.mbtree_fix8_unpack, dsta, fix8_src, count );
+
+            if( memcmp( dsta, dstc, count * sizeof(float) ) || M32( &dsta[count] ) != 0xAAAAAAAA )
+            {
+                ok = 0;
+                fprintf( stderr, "mbtree_fix8_unpack FAILED\n" );
+                break;
+            }
+        }
+    }
     report( "mbtree :" );
 
     if( mc_a.memcpy_aligned != mc_ref.memcpy_aligned )
@@ -2090,7 +2154,7 @@ static int check_quant( int cpu_ref, int cpu_new )
         {
             set_func_name( "idct_dequant_2x4_dc_%s", i_cqm?"cqm":"flat" );
             used_asms[1] = 1;
-            for( int qp = h->param.rc.i_qp_max; qp >= h->param.rc.i_qp_min; qp-- )
+            for( int qp = h->chroma_qp_table[h->param.rc.i_qp_max]; qp >= h->chroma_qp_table[h->param.rc.i_qp_min]; qp-- )
             {
                 for( int i = 0; i < 8; i++ )
                     dct1[i] = rand()%(PIXEL_MAX*16*2+1) - PIXEL_MAX*16;
@@ -2110,9 +2174,9 @@ static int check_quant( int cpu_ref, int cpu_new )
 
         if( qf_a.idct_dequant_2x4_dconly != qf_ref.idct_dequant_2x4_dconly )
         {
-            set_func_name( "idct_dequant_2x4_dc_%s", i_cqm?"cqm":"flat" );
+            set_func_name( "idct_dequant_2x4_dconly_%s", i_cqm?"cqm":"flat" );
             used_asms[1] = 1;
-            for( int qp = h->param.rc.i_qp_max; qp >= h->param.rc.i_qp_min; qp-- )
+            for( int qp = h->chroma_qp_table[h->param.rc.i_qp_max]; qp >= h->chroma_qp_table[h->param.rc.i_qp_min]; qp-- )
             {
                 for( int i = 0; i < 8; i++ )
                     dct1[i] = rand()%(PIXEL_MAX*16*2+1) - PIXEL_MAX*16;
@@ -2143,7 +2207,7 @@ static int check_quant( int cpu_ref, int cpu_new )
                 int dmf = h->dequant4_mf[CQM_4IC][qpdc%6][0] << qpdc/6; \
                 if( dmf > 32*64 ) \
                     continue; \
-                for( int i = 16; ; i <<= 1 ) \
+                for( int i = 16;; i <<= 1 ) \
                 { \
                     int res_c, res_asm; \
                     int max = X264_MIN( i, PIXEL_MAX*16 ); \
@@ -2822,6 +2886,11 @@ static int check_all_flags( void )
 int main(int argc, char *argv[])
 {
     int ret = 0;
+
+#ifdef _WIN32
+    /* Disable the Windows Error Reporting dialog */
+    SetErrorMode( SEM_NOGPFAULTERRORBOX );
+#endif
 
     if( argc > 1 && !strncmp( argv[1], "--bench", 7 ) )
     {

@@ -1144,6 +1144,7 @@ static int x264_validate_parameters( x264_t *h, int b_open )
     if( h->param.analyse.i_subpel_refine >= 10 && (h->param.analyse.i_trellis != 2 || !h->param.rc.i_aq_mode) )
         h->param.analyse.i_subpel_refine = 9;
 
+    if( b_open )
     {
         const x264_level_t *l = x264_levels;
         if( h->param.i_level_idc < 0 )
@@ -1813,7 +1814,7 @@ int x264_encoder_reconfig_apply( x264_t *h, x264_param_t *param )
 
     mbcmp_init( h );
     if( !ret )
-        x264_sps_init( h->sps, h->param.i_sps_id, &h->param );
+        x264_sps_init_reconfigurable( h->sps, &h->param );
 
     /* Supported reconfiguration options (1-pass only):
      * vbv-maxrate
@@ -2032,7 +2033,7 @@ static inline void x264_reference_check_reorder( x264_t *h )
 }
 
 /* return -1 on failure, else return the index of the new reference frame */
-int x264_weighted_reference_duplicate( x264_t *h, int i_ref, const x264_weight_t *w )
+static int x264_weighted_reference_duplicate( x264_t *h, int i_ref, const x264_weight_t *w )
 {
     int i = h->i_ref[0];
     int j = 1;
@@ -3343,6 +3344,7 @@ int     x264_encoder_encode( x264_t *h,
             h->fenc->param = NULL;
         }
     }
+    x264_ratecontrol_zone_init( h );
 
     // ok to call this before encoding any frames, since the initial values of fdec have b_kept_as_ref=0
     if( x264_reference_update( h ) )
