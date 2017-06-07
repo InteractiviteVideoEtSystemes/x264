@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cabac.c: cabac bitstream writing
  *****************************************************************************
- * Copyright (C) 2003-2016 x264 project
+ * Copyright (C) 2003-2017 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -801,7 +801,7 @@ void x264_cabac_block_residual_c( x264_t *h, x264_cabac_t *cb, int ctx_block_cat
 
 static void ALWAYS_INLINE x264_cabac_block_residual( x264_t *h, x264_cabac_t *cb, int ctx_block_cat, dctcoef *l )
 {
-#if ARCH_X86_64 && HAVE_MMX
+#if ARCH_X86_64 && HAVE_MMX && !defined( __MACH__ )
     h->bsf.cabac_block_residual_internal( l, MB_INTERLACED, ctx_block_cat, cb );
 #else
     x264_cabac_block_residual_c( h, cb, ctx_block_cat, l );
@@ -915,7 +915,7 @@ void x264_cabac_block_residual_rd_c( x264_t *h, x264_cabac_t *cb, int ctx_block_
 
 static ALWAYS_INLINE void x264_cabac_block_residual_8x8( x264_t *h, x264_cabac_t *cb, int ctx_block_cat, dctcoef *l )
 {
-#if ARCH_X86_64 && HAVE_MMX
+#if ARCH_X86_64 && HAVE_MMX && !defined( __MACH__ )
     h->bsf.cabac_block_residual_8x8_rd_internal( l, MB_INTERLACED, ctx_block_cat, cb );
 #else
     x264_cabac_block_residual_8x8_rd_c( h, cb, ctx_block_cat, l );
@@ -923,7 +923,7 @@ static ALWAYS_INLINE void x264_cabac_block_residual_8x8( x264_t *h, x264_cabac_t
 }
 static ALWAYS_INLINE void x264_cabac_block_residual( x264_t *h, x264_cabac_t *cb, int ctx_block_cat, dctcoef *l )
 {
-#if ARCH_X86_64 && HAVE_MMX
+#if ARCH_X86_64 && HAVE_MMX && !defined( __MACH__ )
     h->bsf.cabac_block_residual_rd_internal( l, MB_INTERLACED, ctx_block_cat, cb );
 #else
     x264_cabac_block_residual_rd_c( h, cb, ctx_block_cat, l );

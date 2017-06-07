@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cabac.h: arithmetic coder
  *****************************************************************************
- * Copyright (C) 2003-2016 x264 project
+ * Copyright (C) 2003-2017 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -42,7 +42,7 @@ typedef struct
     uint8_t *p_end;
 
     /* aligned for memcpy_aligned starting here */
-    ALIGNED_16( int f8_bits_encoded ); // only if using x264_cabac_size_decision()
+    ALIGNED_64( int f8_bits_encoded ); // only if using x264_cabac_size_decision()
 
     /* context */
     uint8_t state[1024];

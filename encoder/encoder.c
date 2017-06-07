@@ -1,7 +1,7 @@
 /*****************************************************************************
  * encoder.c: top-level encoder functions
  *****************************************************************************
- * Copyright (C) 2003-2016 x264 project
+ * Copyright (C) 2003-2017 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -100,10 +100,10 @@ static void x264_frame_dump( x264_t *h )
         {
             int cw = h->param.i_width>>1;
             int ch = h->param.i_height>>CHROMA_V_SHIFT;
-            pixel *planeu = x264_malloc( (cw*ch*2+32)*sizeof(pixel) );
+            pixel *planeu = x264_malloc( 2 * (cw*ch*sizeof(pixel) + 32) );
             if( planeu )
             {
-                pixel *planev = planeu + cw*ch + 16;
+                pixel *planev = planeu + cw*ch + 32/sizeof(pixel);
                 h->mc.plane_copy_deinterleave( planeu, cw, planev, cw, h->fdec->plane[1], h->fdec->i_stride[1], cw, ch );
                 fwrite( planeu, 1, cw*ch*sizeof(pixel), f );
                 fwrite( planev, 1, cw*ch*sizeof(pixel), f );
@@ -444,11 +444,6 @@ static int x264_validate_parameters( x264_t *h, int b_open )
             fail = 1;
         }
 #endif
-        if( !fail && !(cpuflags & X264_CPU_CMOV) )
-        {
-            x264_log( h, X264_LOG_ERROR, "your cpu does not support CMOV, but x264 was compiled with asm\n");
-            fail = 1;
-        }
         if( fail )
         {
             x264_log( h, X264_LOG_ERROR, "to run x264, recompile without asm (configure --disable-asm)\n");
@@ -494,7 +489,8 @@ static int x264_validate_parameters( x264_t *h, int b_open )
 #endif
     if( i_csp <= X264_CSP_NONE || i_csp >= X264_CSP_MAX )
     {
-        x264_log( h, X264_LOG_ERROR, "invalid CSP (only I420/YV12/NV12/NV21/I422/YV16/NV16/I444/YV24/BGR/BGRA/RGB supported)\n" );
+        x264_log( h, X264_LOG_ERROR, "invalid CSP (only I420/YV12/NV12/NV21/I422/YV16/NV16/YUYV/UYVY/"
+                                     "I444/YV24/BGR/BGRA/RGB supported)\n" );
         return -1;
     }
 
@@ -1530,6 +1526,12 @@ x264_t *x264_encoder_open( x264_param_t *param )
     x264_rdo_init();
 
     /* init CPU functions */
+#if (ARCH_X86 || ARCH_X86_64) && HIGH_BIT_DEPTH
+    /* FIXME: Only 8-bit has been optimized for AVX-512 so far. The few AVX-512 functions
+     * enabled in high bit-depth are insignificant and just causes potential issues with
+     * unnecessary thermal throttling and whatnot, so keep it disabled for now. */
+    h->param.cpu &= ~X264_CPU_AVX512;
+#endif
     x264_predict_16x16_init( h->param.cpu, h->predict_16x16 );
     x264_predict_8x8c_init( h->param.cpu, h->predict_8x8c );
     x264_predict_8x16c_init( h->param.cpu, h->predict_8x16c );
@@ -1566,8 +1568,14 @@ x264_t *x264_encoder_open( x264_param_t *param )
         if( !strcmp(x264_cpu_names[i].name, "SSE4.1")
             && (h->param.cpu & X264_CPU_SSE42) )
             continue;
+        if( !strcmp(x264_cpu_names[i].name, "LZCNT")
+            && (h->param.cpu & X264_CPU_BMI1) )
+            continue;
         if( !strcmp(x264_cpu_names[i].name, "BMI1")
             && (h->param.cpu & X264_CPU_BMI2) )
+            continue;
+        if( !strcmp(x264_cpu_names[i].name, "FMA4")
+            && (h->param.cpu & X264_CPU_FMA3) )
             continue;
         if( (h->param.cpu & x264_cpu_names[i].flags) == x264_cpu_names[i].flags
             && (!i || x264_cpu_names[i].flags != x264_cpu_names[i-1].flags) )

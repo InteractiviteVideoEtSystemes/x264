@@ -1,7 +1,7 @@
 /*****************************************************************************
  * pixel.S: arm pixel metrics
  *****************************************************************************
- * Copyright (C) 2009-2016 x264 project
+ * Copyright (C) 2009-2017 x264 project
  *
  * Authors: David Conrad <lessen42@gmail.com>
  *          Janne Grunau <janne-x264@jannau.net>
@@ -26,9 +26,7 @@
 
 #include "asm.S"
 
-.section .rodata
-.align 4
-
+const mask_array, align=4
 .rept 16
         .byte 0xff
 .endr
@@ -36,11 +34,14 @@ mask_ff:
 .rept 16
         .byte 0
 .endr
+endconst
 
-mask_ac4:
+const mask_ac4, align=4
 .short 0, -1, -1, -1,  0, -1, -1, -1
-mask_ac8:
+endconst
+const mask_ac8, align=4
 .short 0, -1, -1, -1, -1, -1, -1, -1
+endconst
 
 .text
 
