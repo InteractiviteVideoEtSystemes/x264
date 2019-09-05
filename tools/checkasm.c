@@ -1,7 +1,7 @@
 /*****************************************************************************
  * checkasm.c: assembly check tool
  *****************************************************************************
- * Copyright (C) 2003-2017 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -27,7 +27,6 @@
 
 #include <ctype.h>
 #include "common/common.h"
-#include "common/cpu.h"
 #include "encoder/macroblock.h"
 
 #ifdef _WIN32
@@ -41,15 +40,15 @@
 #endif
 
 /* buf1, buf2: initialised to random data and shouldn't write into them */
-uint8_t *buf1, *buf2;
+static uint8_t *buf1, *buf2;
 /* buf3, buf4: used to store output */
-uint8_t *buf3, *buf4;
+static uint8_t *buf3, *buf4;
 /* pbuf1, pbuf2: initialised to random pixel data and shouldn't write into them. */
-pixel *pbuf1, *pbuf2;
+static pixel *pbuf1, *pbuf2;
 /* pbuf3, pbuf4: point to buf3, buf4, just for type convenience */
-pixel *pbuf3, *pbuf4;
+static pixel *pbuf3, *pbuf4;
 
-int quiet = 0;
+static int quiet = 0;
 
 #define report( name ) { \
     if( used_asm && !quiet ) \
@@ -75,10 +74,10 @@ typedef struct
     bench_t vers[MAX_CPUS];
 } bench_func_t;
 
-int do_bench = 0;
-int bench_pattern_len = 0;
-const char *bench_pattern = "";
-char func_name[100];
+static int do_bench = 0;
+static int bench_pattern_len = 0;
+static const char *bench_pattern = "";
+static char func_name[100];
 static bench_func_t benchs[MAX_FUNCS];
 
 static const char *pixel_names[12] = { "16x16", "16x8", "8x16", "8x8", "8x4", "4x8", "4x4", "4x16", "4x2", "2x8", "2x4", "2x2" };
@@ -597,13 +596,13 @@ static int check_pixel( int cpu_ref, int cpu_new )
 #define TEST_INTRA_X3( name, i8x8, ... ) \
     if( pixel_asm.name && pixel_asm.name != pixel_ref.name ) \
     { \
-        ALIGNED_16( int res_c[3] ); \
-        ALIGNED_16( int res_asm[3] ); \
+        ALIGNED_16( int res_c[4] ); \
+        ALIGNED_16( int res_asm[4] ); \
         set_func_name( #name ); \
         used_asm = 1; \
         call_c( pixel_c.name, pbuf1+48, i8x8 ? edge : pbuf3+48, res_c ); \
         call_a( pixel_asm.name, pbuf1+48, i8x8 ? edge : pbuf3+48, res_asm ); \
-        if( memcmp(res_c, res_asm, sizeof(res_c)) ) \
+        if( memcmp(res_c, res_asm, 3 * sizeof(*res_c)) ) \
         { \
             ok = 0; \
             fprintf( stderr, #name": %d,%d,%d != %d,%d,%d [FAILED]\n", \
@@ -843,7 +842,7 @@ static int check_dct( int cpu_ref, int cpu_new )
     x264_quant_function_t qf;
     int ret = 0, ok, used_asm, interlace = 0;
     ALIGNED_ARRAY_64( dctcoef, dct1, [16],[16] );
-    ALIGNED_ARRAY_32( dctcoef, dct2, [16],[16] );
+    ALIGNED_ARRAY_64( dctcoef, dct2, [16],[16] );
     ALIGNED_ARRAY_64( dctcoef, dct4, [16],[16] );
     ALIGNED_ARRAY_64( dctcoef, dct8, [4],[64] );
     ALIGNED_16( dctcoef dctdc[2][8] );
@@ -862,7 +861,7 @@ static int check_dct( int cpu_ref, int cpu_new )
     h->param.analyse.i_luma_deadzone[1] = 0;
     h->param.analyse.b_transform_8x8 = 1;
     for( int i = 0; i < 6; i++ )
-        h->pps->scaling_list[i] = x264_cqm_flat16;
+        h->sps->scaling_list[i] = x264_cqm_flat16;
     x264_cqm_init( h );
     x264_quant_init( h, 0, &qf );
 
@@ -1765,15 +1764,16 @@ static int check_mc( int cpu_ref, int cpu_new )
             h.mb.i_mb_width = width;
             h.mb.i_mb_height = height;
 
-            uint16_t *ref_costsc = (uint16_t*)buf3;
-            uint16_t *ref_costsa = (uint16_t*)buf4;
-            int16_t (*mvs)[2] = (int16_t(*)[2])(ref_costsc + size);
+            uint16_t *ref_costsc = (uint16_t*)buf3 + width;
+            uint16_t *ref_costsa = (uint16_t*)buf4 + width;
+            int16_t (*mvs)[2] = (int16_t(*)[2])(ref_costsc + width + size);
             int16_t *propagate_amount = (int16_t*)(mvs + width);
             uint16_t *lowres_costs = (uint16_t*)(propagate_amount + width);
-            h.scratch_buffer2 = (uint8_t*)(ref_costsa + size);
+            h.scratch_buffer2 = (uint8_t*)(ref_costsa + width + size);
             int bipred_weight = (rand()%63)+1;
+            int mb_y = rand()&3;
             int list = i&1;
-            for( int j = 0; j < size; j++ )
+            for( int j = -width; j < size+width; j++ )
                 ref_costsc[j] = ref_costsa[j] = rand()&32767;
             for( int j = 0; j < width; j++ )
             {
@@ -1784,20 +1784,22 @@ static int check_mc( int cpu_ref, int cpu_new )
                 lowres_costs[j] = list_dist[list][rand()&7] << LOWRES_COST_SHIFT;
             }
 
-            call_c1( mc_c.mbtree_propagate_list, &h, ref_costsc, mvs, propagate_amount, lowres_costs, bipred_weight, 0, width, list );
-            call_a1( mc_a.mbtree_propagate_list, &h, ref_costsa, mvs, propagate_amount, lowres_costs, bipred_weight, 0, width, list );
+            call_c1( mc_c.mbtree_propagate_list, &h, ref_costsc, mvs, propagate_amount, lowres_costs, bipred_weight, mb_y, width, list );
+            call_a1( mc_a.mbtree_propagate_list, &h, ref_costsa, mvs, propagate_amount, lowres_costs, bipred_weight, mb_y, width, list );
 
-            for( int j = 0; j < size && ok; j++ )
+            for( int j = -width; j < size+width && ok; j++ )
             {
                 ok &= abs(ref_costsa[j] - ref_costsc[j]) <= 1;
                 if( !ok )
                     fprintf( stderr, "mbtree_propagate_list FAILED at %d: %d !~= %d\n", j, ref_costsc[j], ref_costsa[j] );
             }
 
-            call_c2( mc_c.mbtree_propagate_list, &h, ref_costsc, mvs, propagate_amount, lowres_costs, bipred_weight, 0, width, list );
-            call_a2( mc_a.mbtree_propagate_list, &h, ref_costsa, mvs, propagate_amount, lowres_costs, bipred_weight, 0, width, list );
+            call_c2( mc_c.mbtree_propagate_list, &h, ref_costsc, mvs, propagate_amount, lowres_costs, bipred_weight, mb_y, width, list );
+            call_a2( mc_a.mbtree_propagate_list, &h, ref_costsa, mvs, propagate_amount, lowres_costs, bipred_weight, mb_y, width, list );
         }
     }
+
+    static const uint16_t mbtree_fix8_counts[] = { 5, 384, 392, 400, 415 };
 
     if( mc_a.mbtree_fix8_pack != mc_ref.mbtree_fix8_pack )
     {
@@ -1806,9 +1808,9 @@ static int check_mc( int cpu_ref, int cpu_new )
         float *fix8_src = (float*)(buf3 + 0x800);
         uint16_t *dstc = (uint16_t*)buf3;
         uint16_t *dsta = (uint16_t*)buf4;
-        for( int i = 0; i < 5; i++ )
+        for( int i = 0; i < ARRAY_ELEMS(mbtree_fix8_counts); i++ )
         {
-            int count = 256 + i;
+            int count = mbtree_fix8_counts[i];
 
             for( int j = 0; j < count; j++ )
                 fix8_src[j] = (int16_t)(rand()) / 256.0f;
@@ -1833,9 +1835,9 @@ static int check_mc( int cpu_ref, int cpu_new )
         uint16_t *fix8_src = (uint16_t*)(buf3 + 0x800);
         float *dstc = (float*)buf3;
         float *dsta = (float*)buf4;
-        for( int i = 0; i < 5; i++ )
+        for( int i = 0; i < ARRAY_ELEMS(mbtree_fix8_counts); i++ )
         {
-            int count = 256 + i;
+            int count = mbtree_fix8_counts[i];
 
             for( int j = 0; j < count; j++ )
                 fix8_src[j] = rand();
@@ -1981,7 +1983,7 @@ static int check_deblock( int cpu_ref, int cpu_new )
                 {
                     ref[j][k] = ((rand()&3) != 3) ? 0 : (rand() & 31) - 2;
                     for( int l = 0; l < 2; l++ )
-                        mv[j][k][l] = ((rand()&7) != 7) ? (rand()&7) - 3 : (rand()&1023) - 512;
+                        mv[j][k][l] = ((rand()&7) != 7) ? (rand()&7) - 3 : (rand()&16383) - 8192;
                 }
             call_c( db_c.deblock_strength, nnz, ref, mv, bs[0], 2<<(i&1), ((i>>1)&1) );
             call_a( db_a.deblock_strength, nnz, ref, mv, bs[1], 2<<(i&1), ((i>>1)&1) );
@@ -2035,14 +2037,14 @@ static int check_quant( int cpu_ref, int cpu_new )
         if( i_cqm == 0 )
         {
             for( int i = 0; i < 6; i++ )
-                h->pps->scaling_list[i] = x264_cqm_flat16;
-            h->param.i_cqm_preset = h->pps->i_cqm_preset = X264_CQM_FLAT;
+                h->sps->scaling_list[i] = x264_cqm_flat16;
+            h->param.i_cqm_preset = h->sps->i_cqm_preset = X264_CQM_FLAT;
         }
         else if( i_cqm == 1 )
         {
             for( int i = 0; i < 6; i++ )
-                h->pps->scaling_list[i] = x264_cqm_jvt[i];
-            h->param.i_cqm_preset = h->pps->i_cqm_preset = X264_CQM_JVT;
+                h->sps->scaling_list[i] = x264_cqm_jvt[i];
+            h->param.i_cqm_preset = h->sps->i_cqm_preset = X264_CQM_JVT;
         }
         else
         {
@@ -2054,8 +2056,8 @@ static int check_quant( int cpu_ref, int cpu_new )
                 for( int i = 0; i < 64; i++ )
                     cqm_buf[i] = 1;
             for( int i = 0; i < 6; i++ )
-                h->pps->scaling_list[i] = cqm_buf;
-            h->param.i_cqm_preset = h->pps->i_cqm_preset = X264_CQM_CUSTOM;
+                h->sps->scaling_list[i] = cqm_buf;
+            h->param.i_cqm_preset = h->sps->i_cqm_preset = X264_CQM_CUSTOM;
         }
 
         h->param.rc.i_qp_min = 0;
@@ -2911,7 +2913,7 @@ static int check_all_flags( void )
     return ret;
 }
 
-int main(int argc, char *argv[])
+static int main_internal( int argc, char **argv )
 {
 #ifdef _WIN32
     /* Disable the Windows Error Reporting dialog */
@@ -2971,3 +2973,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+int main( int argc, char **argv )
+{
+    return x264_stack_align( main_internal, argc, argv );
+}
