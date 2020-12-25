@@ -1,7 +1,7 @@
 /*****************************************************************************
  * base.c: misc common functions (bit depth independent)
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -99,13 +99,18 @@ void x264_log_internal( int i_level, const char *psz_fmt, ... )
 /****************************************************************************
  * x264_malloc:
  ****************************************************************************/
-void *x264_malloc( int i_size )
+void *x264_malloc( int64_t i_size )
 {
+#define HUGE_PAGE_SIZE 2*1024*1024
+#define HUGE_PAGE_THRESHOLD HUGE_PAGE_SIZE*7/8 /* FIXME: Is this optimal? */
+    if( i_size < 0 || (uint64_t)i_size > (SIZE_MAX - HUGE_PAGE_SIZE) /*|| (uint64_t)i_size > (SIZE_MAX - NATIVE_ALIGN - sizeof(void **))*/ )
+    {
+        x264_log_internal( X264_LOG_ERROR, "invalid size of malloc: %"PRId64"\n", i_size );
+        return NULL;
+    }
     uint8_t *align_buf = NULL;
 #if HAVE_MALLOC_H
 #if HAVE_THP
-#define HUGE_PAGE_SIZE 2*1024*1024
-#define HUGE_PAGE_THRESHOLD HUGE_PAGE_SIZE*7/8 /* FIXME: Is this optimal? */
     /* Attempt to allocate huge pages to reduce TLB misses. */
     if( i_size >= HUGE_PAGE_THRESHOLD )
     {
@@ -118,8 +123,6 @@ void *x264_malloc( int i_size )
         }
     }
     else
-#undef HUGE_PAGE_SIZE
-#undef HUGE_PAGE_THRESHOLD
 #endif
         align_buf = memalign( NATIVE_ALIGN, i_size );
 #else
@@ -132,8 +135,10 @@ void *x264_malloc( int i_size )
     }
 #endif
     if( !align_buf )
-        x264_log_internal( X264_LOG_ERROR, "malloc of size %d failed\n", i_size );
+        x264_log_internal( X264_LOG_ERROR, "malloc of size %"PRId64" failed\n", i_size );
     return align_buf;
+#undef HUGE_PAGE_SIZE
+#undef HUGE_PAGE_THRESHOLD
 }
 
 /****************************************************************************
@@ -175,7 +180,7 @@ char *x264_slurp_file( const char *filename )
     if( !buf )
         goto error;
 
-    b_error |= fread( buf, 1, i_size, fh ) != i_size;
+    b_error |= fread( buf, 1, i_size, fh ) != (uint64_t)i_size;
     fclose( fh );
     if( b_error )
     {
@@ -194,9 +199,69 @@ error:
 }
 
 /****************************************************************************
+ * x264_param_strdup:
+ ****************************************************************************/
+typedef struct {
+    int size;
+    int count;
+    void *ptr[];
+} strdup_buffer;
+
+#define BUFFER_OFFSET offsetof(strdup_buffer, ptr)
+#define BUFFER_DEFAULT_SIZE 16
+
+char *x264_param_strdup( x264_param_t *param, const char *src )
+{
+    strdup_buffer *buf = param->opaque;
+    if( !buf )
+    {
+        buf = malloc( BUFFER_OFFSET + BUFFER_DEFAULT_SIZE * sizeof(void *) );
+        if( !buf )
+            goto fail;
+        buf->size = BUFFER_DEFAULT_SIZE;
+        buf->count = 0;
+        param->opaque = buf;
+    }
+    else if( buf->count == buf->size )
+    {
+        if( buf->size > (INT_MAX - BUFFER_OFFSET) / 2 / (int)sizeof(void *) )
+            goto fail;
+        int new_size = buf->size * 2;
+        buf = realloc( buf, BUFFER_OFFSET + new_size * sizeof(void *) );
+        if( !buf )
+            goto fail;
+        buf->size = new_size;
+        param->opaque = buf;
+    }
+    char *res = strdup( src );
+    if( !res )
+        goto fail;
+    buf->ptr[buf->count++] = res;
+    return res;
+fail:
+    x264_log_internal( X264_LOG_ERROR, "x264_param_strdup failed\n" );
+    return NULL;
+}
+
+/****************************************************************************
+ * x264_param_cleanup:
+ ****************************************************************************/
+REALIGN_STACK void x264_param_cleanup( x264_param_t *param )
+{
+    strdup_buffer *buf = param->opaque;
+    if( buf )
+    {
+        for( int i = 0; i < buf->count; i++ )
+            free( buf->ptr[i] );
+        free( buf );
+        param->opaque = NULL;
+    }
+}
+
+/****************************************************************************
  * x264_picture_init:
  ****************************************************************************/
-static void picture_init( x264_picture_t *pic )
+REALIGN_STACK void x264_picture_init( x264_picture_t *pic )
 {
     memset( pic, 0, sizeof( x264_picture_t ) );
     pic->i_type = X264_TYPE_AUTO;
@@ -204,15 +269,10 @@ static void picture_init( x264_picture_t *pic )
     pic->i_pic_struct = PIC_STRUCT_AUTO;
 }
 
-void x264_picture_init( x264_picture_t *pic )
-{
-    x264_stack_align( picture_init, pic );
-}
-
 /****************************************************************************
  * x264_picture_alloc:
  ****************************************************************************/
-static int picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
+REALIGN_STACK int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
 {
     typedef struct
     {
@@ -223,6 +283,7 @@ static int picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_hei
 
     static const x264_csp_tab_t csp_tab[] =
     {
+        [X264_CSP_I400] = { 1, { 256*1 },               { 256*1 }               },
         [X264_CSP_I420] = { 3, { 256*1, 256/2, 256/2 }, { 256*1, 256/2, 256/2 } },
         [X264_CSP_YV12] = { 3, { 256*1, 256/2, 256/2 }, { 256*1, 256/2, 256/2 } },
         [X264_CSP_NV12] = { 2, { 256*1, 256*1 },        { 256*1, 256/2 },       },
@@ -242,16 +303,16 @@ static int picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_hei
     int csp = i_csp & X264_CSP_MASK;
     if( csp <= X264_CSP_NONE || csp >= X264_CSP_MAX || csp == X264_CSP_V210 )
         return -1;
-    picture_init( pic );
+    x264_picture_init( pic );
     pic->img.i_csp = i_csp;
     pic->img.i_plane = csp_tab[csp].planes;
     int depth_factor = i_csp & X264_CSP_HIGH_DEPTH ? 2 : 1;
-    int plane_offset[3] = {0};
-    int frame_size = 0;
+    int64_t plane_offset[3] = {0};
+    int64_t frame_size = 0;
     for( int i = 0; i < pic->img.i_plane; i++ )
     {
         int stride = (((int64_t)i_width * csp_tab[csp].width_fix8[i]) >> 8) * depth_factor;
-        int plane_size = (((int64_t)i_height * csp_tab[csp].height_fix8[i]) >> 8) * stride;
+        int64_t plane_size = (((int64_t)i_height * csp_tab[csp].height_fix8[i]) >> 8) * stride;
         pic->img.i_stride[i] = stride;
         plane_offset[i] = frame_size;
         frame_size += plane_size;
@@ -264,15 +325,10 @@ static int picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_hei
     return 0;
 }
 
-int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
-{
-    return x264_stack_align( picture_alloc, pic, i_csp, i_width, i_height );
-}
-
 /****************************************************************************
  * x264_picture_clean:
  ****************************************************************************/
-static void picture_clean( x264_picture_t *pic )
+REALIGN_STACK void x264_picture_clean( x264_picture_t *pic )
 {
     x264_free( pic->img.plane[0] );
 
@@ -280,15 +336,10 @@ static void picture_clean( x264_picture_t *pic )
     memset( pic, 0, sizeof( x264_picture_t ) );
 }
 
-void x264_picture_clean( x264_picture_t *pic )
-{
-    x264_stack_align( picture_clean, pic );
-}
-
 /****************************************************************************
  * x264_param_default:
  ****************************************************************************/
-static void param_default( x264_param_t *param )
+REALIGN_STACK void x264_param_default( x264_param_t *param )
 {
     /* */
     memset( param, 0, sizeof( x264_param_t ) );
@@ -433,16 +484,11 @@ static void param_default( x264_param_t *param )
     param->i_avcintra_flavor = X264_AVCINTRA_FLAVOR_PANASONIC;
 }
 
-void x264_param_default( x264_param_t *param )
-{
-    x264_stack_align( param_default, param );
-}
-
 static int param_apply_preset( x264_param_t *param, const char *preset )
 {
     char *end;
     int i = strtol( preset, &end, 10 );
-    if( *end == 0 && i >= 0 && i < sizeof(x264_preset_names)/sizeof(*x264_preset_names)-1 )
+    if( *end == 0 && i >= 0 && i < ARRAY_ELEMS(x264_preset_names)-1 )
         preset = x264_preset_names[i];
 
     if( !strcasecmp( preset, "ultrafast" ) )
@@ -655,9 +701,9 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
     return 0;
 }
 
-static int param_default_preset( x264_param_t *param, const char *preset, const char *tune )
+REALIGN_STACK int x264_param_default_preset( x264_param_t *param, const char *preset, const char *tune )
 {
-    param_default( param );
+    x264_param_default( param );
 
     if( preset && param_apply_preset( param, preset ) < 0 )
         return -1;
@@ -666,12 +712,7 @@ static int param_default_preset( x264_param_t *param, const char *preset, const 
     return 0;
 }
 
-int x264_param_default_preset( x264_param_t *param, const char *preset, const char *tune )
-{
-    return x264_stack_align( param_default_preset, param, preset, tune );
-}
-
-static void param_apply_fastfirstpass( x264_param_t *param )
+REALIGN_STACK void x264_param_apply_fastfirstpass( x264_param_t *param )
 {
     /* Set faster options in case of turbo firstpass. */
     if( param->rc.b_stat_write && !param->rc.b_stat_read )
@@ -684,11 +725,6 @@ static void param_apply_fastfirstpass( x264_param_t *param )
         param->analyse.i_trellis = 0;
         param->analyse.b_fast_pskip = 1;
     }
-}
-
-void x264_param_apply_fastfirstpass( x264_param_t *param )
-{
-    x264_stack_align( param_apply_fastfirstpass, param );
 }
 
 static int profile_string_to_int( const char *str )
@@ -708,7 +744,7 @@ static int profile_string_to_int( const char *str )
     return -1;
 }
 
-static int param_apply_profile( x264_param_t *param, const char *profile )
+REALIGN_STACK int x264_param_apply_profile( x264_param_t *param, const char *profile )
 {
     if( !profile )
         return 0;
@@ -775,11 +811,6 @@ static int param_apply_profile( x264_param_t *param, const char *profile )
     return 0;
 }
 
-int x264_param_apply_profile( x264_param_t *param, const char *profile )
-{
-    return x264_stack_align( param_apply_profile, param, profile );
-}
-
 static int parse_enum( const char *arg, const char * const *names, int *dst )
 {
     for( int i = 0; names[i]; i++ )
@@ -840,8 +871,17 @@ static double atof_internal( const char *str, int *b_error )
 #undef atof
 #define atoi(str) atoi_internal( str, &b_error )
 #define atof(str) atof_internal( str, &b_error )
+#define CHECKED_ERROR_PARAM_STRDUP( var, param, src )\
+do {\
+    var = x264_param_strdup( param, src );\
+    if( !var )\
+    {\
+        b_error = 1;\
+        errortype = X264_PARAM_ALLOC_FAILED;\
+    }\
+} while( 0 )
 
-static int param_parse( x264_param_t *p, const char *name, const char *value )
+REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const char *value )
 {
     char *name_buf = NULL;
     int b_error = 0;
@@ -862,7 +902,7 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
         char *c;
         name_buf = strdup(name);
         if( !name_buf )
-            return X264_PARAM_BAD_NAME;
+            return X264_PARAM_ALLOC_FAILED;
         while( (c = strchr( name_buf, '_' )) )
             *c = '-';
         name = name_buf;
@@ -905,6 +945,8 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
                 if( (p->cpu&X264_CPU_SSSE3) && !(p->cpu&X264_CPU_SSE2_IS_SLOW) )
                     p->cpu |= X264_CPU_SSE2_IS_FAST;
             }
+            else
+                errortype = X264_PARAM_ALLOC_FAILED;
         }
     }
     OPT("threads")
@@ -1091,10 +1133,10 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
         else if( strstr( value, "jvt" ) )
             p->i_cqm_preset = X264_CQM_JVT;
         else
-            p->psz_cqm_file = strdup(value);
+            CHECKED_ERROR_PARAM_STRDUP( p->psz_cqm_file, p, value );
     }
     OPT("cqmfile")
-        p->psz_cqm_file = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_cqm_file, p, value );
     OPT("cqm4")
     {
         p->i_cqm_preset = X264_CQM_CUSTOM;
@@ -1158,7 +1200,7 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
     OPT("log")
         p->i_log_level = atoi(value);
     OPT("dump-yuv")
-        p->psz_dump_yuv = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_dump_yuv, p, value );
     OPT2("analyse", "partitions")
     {
         p->analyse.inter = 0;
@@ -1274,8 +1316,8 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
     }
     OPT("stats")
     {
-        p->rc.psz_stat_in = strdup(value);
-        p->rc.psz_stat_out = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_stat_in, p, value );
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_stat_out, p, value );
     }
     OPT("qcomp")
         p->rc.f_qcompress = atof(value);
@@ -1286,9 +1328,9 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
     OPT2("cplxblur", "cplx-blur")
         p->rc.f_complexity_blur = atof(value);
     OPT("zones")
-        p->rc.psz_zones = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_zones, p, value );
     OPT("crop-rect")
-        b_error |= sscanf( value, "%u,%u,%u,%u", &p->crop_rect.i_left, &p->crop_rect.i_top,
+        b_error |= sscanf( value, "%d,%d,%d,%d", &p->crop_rect.i_left, &p->crop_rect.i_top,
                                                  &p->crop_rect.i_right, &p->crop_rect.i_bottom ) != 4;
     OPT("psnr")
         p->analyse.b_psnr = atobool(value);
@@ -1321,7 +1363,7 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
     OPT("opencl")
         p->b_opencl = atobool( value );
     OPT("opencl-clbin")
-        p->psz_clbin_file = strdup( value );
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_clbin_file, p, value );
     OPT("opencl-device")
         p->i_opencl_device = atoi( value );
     else
@@ -1340,11 +1382,6 @@ static int param_parse( x264_param_t *p, const char *name, const char *value )
 
     b_error |= value_was_null && !name_was_bool;
     return b_error ? errortype : 0;
-}
-
-int x264_param_parse( x264_param_t *param, const char *name, const char *value )
-{
-    return x264_stack_align( param_parse, param, name, value );
 }
 
 /****************************************************************************
@@ -1459,7 +1496,7 @@ char *x264_param2string( x264_param_t *p, int b_res )
     if( p->rc.i_vbv_buffer_size )
         s += sprintf( s, " nal_hrd=%s filler=%d", x264_nal_hrd_names[p->i_nal_hrd], p->rc.b_filler );
     if( p->crop_rect.i_left | p->crop_rect.i_top | p->crop_rect.i_right | p->crop_rect.i_bottom )
-        s += sprintf( s, " crop_rect=%u,%u,%u,%u", p->crop_rect.i_left, p->crop_rect.i_top,
+        s += sprintf( s, " crop_rect=%d,%d,%d,%d", p->crop_rect.i_left, p->crop_rect.i_top,
                                                    p->crop_rect.i_right, p->crop_rect.i_bottom );
     if( p->i_frame_packing >= 0 )
         s += sprintf( s, " frame-packing=%d", p->i_frame_packing );

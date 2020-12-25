@@ -1,7 +1,7 @@
 /*****************************************************************************
  * timecode.c: timecode file input
  *****************************************************************************
- * Copyright (C) 2010-2019 x264 project
+ * Copyright (C) 2010-2020 x264 project
  *
  * Authors: Yusuke Nakamura <muken.the.vfrmaniac@gmail.com>
  *
@@ -105,7 +105,7 @@ static int parse_tcfile( FILE *tcfile_in, timecode_hnd_t *h, video_info_t *info 
 #define NO_TIMECODE_LINE (buff[0] == '#' || buff[0] == '\n' || buff[0] == '\r')
     if( tcfv == 1 )
     {
-        uint64_t file_pos;
+        int64_t file_pos;
         double assume_fps, seq_fps;
         int start, end = -1;
         int prev_start = -1, prev_end = -1;
@@ -221,7 +221,7 @@ static int parse_tcfile( FILE *tcfile_in, timecode_hnd_t *h, video_info_t *info 
     }
     else    /* tcfv == 2 */
     {
-        uint64_t file_pos = ftell( tcfile_in );
+        int64_t file_pos = ftell( tcfile_in );
 
         h->stored_pts_num = 0;
         while( fgets( buff, sizeof(buff), tcfile_in ) != NULL )

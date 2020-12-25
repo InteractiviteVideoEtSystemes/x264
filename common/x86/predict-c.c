@@ -1,7 +1,7 @@
 /*****************************************************************************
  * predict-c.c: intra prediction
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -91,8 +91,11 @@ static void predict_16x16_p_##name( pixel *src )\
         "paddd        %%xmm1, %%xmm0 \n"\
         "movd         %%xmm0, %0     \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE-1]), "m"(src[-FDEC_STRIDE+8]),\
-         "m"(*pw_12345678), "m"(*pw_m87654321)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE-1], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE+8], const pixel, 8)),\
+         "m"(MEM_FIX(pw_12345678, const int16_t, 8)),\
+         "m"(MEM_FIX(pw_m87654321, const int16_t, 8))\
+        :"xmm0", "xmm1"\
     );
 #else // !HIGH_BIT_DEPTH
 #define PREDICT_16x16_P_ASM\
@@ -110,8 +113,12 @@ static void predict_16x16_p_##name( pixel *src )\
         "movd        %%mm0, %0    \n"\
         "movswl        %w0, %0    \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(src[-FDEC_STRIDE+8]),\
-         "m"(src[-FDEC_STRIDE-8]), "m"(*pb_12345678), "m"(*pb_m87654321)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE+8], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE-8], const pixel, 8)),\
+         "m"(MEM_FIX(pb_12345678, const int8_t, 8)),\
+         "m"(MEM_FIX(pb_m87654321, const int8_t, 8))\
+        :"mm0", "mm1"\
     );
 #endif // HIGH_BIT_DEPTH
 
@@ -229,7 +236,9 @@ static void predict_8x8c_p_##name( pixel *src )\
         "paddd        %%xmm1, %%xmm0 \n"\
         "movd         %%xmm0, %0     \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(*pw_m32101234)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(pw_m32101234, const int16_t, 8))\
+        :"xmm0", "xmm1"\
     );
 #else // !HIGH_BIT_DEPTH
 #define PREDICT_8x8C_P_ASM\
@@ -243,7 +252,9 @@ static void predict_8x8c_p_##name( pixel *src )\
         "movd        %%mm0, %0    \n"\
         "movswl        %w0, %0    \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(*pb_m32101234)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(pb_m32101234, const int8_t, 8))\
+        :"mm0", "mm1"\
     );
 #endif // HIGH_BIT_DEPTH
 
@@ -311,7 +322,7 @@ static void predict_8x8c_dc_left( uint8_t *src )
 /****************************************************************************
  * Exported functions:
  ****************************************************************************/
-void x264_predict_16x16_init_mmx( int cpu, x264_predict_t pf[7] )
+void x264_predict_16x16_init_mmx( uint32_t cpu, x264_predict_t pf[7] )
 {
     if( !(cpu&X264_CPU_MMX2) )
         return;
@@ -370,7 +381,7 @@ void x264_predict_16x16_init_mmx( int cpu, x264_predict_t pf[7] )
     }
 }
 
-void x264_predict_8x8c_init_mmx( int cpu, x264_predict_t pf[7] )
+void x264_predict_8x8c_init_mmx( uint32_t cpu, x264_predict_t pf[7] )
 {
     if( !(cpu&X264_CPU_MMX) )
         return;
@@ -428,7 +439,7 @@ void x264_predict_8x8c_init_mmx( int cpu, x264_predict_t pf[7] )
     }
 }
 
-void x264_predict_8x16c_init_mmx( int cpu, x264_predict_t pf[7] )
+void x264_predict_8x16c_init_mmx( uint32_t cpu, x264_predict_t pf[7] )
 {
     if( !(cpu&X264_CPU_MMX) )
         return;
@@ -479,7 +490,7 @@ void x264_predict_8x16c_init_mmx( int cpu, x264_predict_t pf[7] )
     }
 }
 
-void x264_predict_8x8_init_mmx( int cpu, x264_predict8x8_t pf[12], x264_predict_8x8_filter_t *predict_8x8_filter )
+void x264_predict_8x8_init_mmx( uint32_t cpu, x264_predict8x8_t pf[12], x264_predict_8x8_filter_t *predict_8x8_filter )
 {
     if( !(cpu&X264_CPU_MMX2) )
         return;
@@ -563,7 +574,7 @@ void x264_predict_8x8_init_mmx( int cpu, x264_predict8x8_t pf[12], x264_predict_
 #endif // HIGH_BIT_DEPTH
 }
 
-void x264_predict_4x4_init_mmx( int cpu, x264_predict_t pf[12] )
+void x264_predict_4x4_init_mmx( uint32_t cpu, x264_predict_t pf[12] )
 {
     if( !(cpu&X264_CPU_MMX2) )
         return;

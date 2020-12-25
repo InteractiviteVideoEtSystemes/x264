@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cabac.h: arithmetic coder
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -80,7 +80,7 @@ void x264_cabac_encode_flush( x264_t *h, x264_cabac_t *cb );
 #define x264_cabac_encode_decision x264_cabac_encode_decision_asm
 #define x264_cabac_encode_bypass x264_cabac_encode_bypass_asm
 #define x264_cabac_encode_terminal x264_cabac_encode_terminal_asm
-#elif defined(ARCH_AARCH64)
+#elif HAVE_AARCH64
 #define x264_cabac_encode_decision x264_cabac_encode_decision_asm
 #define x264_cabac_encode_bypass x264_cabac_encode_bypass_asm
 #define x264_cabac_encode_terminal x264_cabac_encode_terminal_asm

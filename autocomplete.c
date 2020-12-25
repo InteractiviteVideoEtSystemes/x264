@@ -1,7 +1,7 @@
 /*****************************************************************************
  * autocomplete: x264cli shell autocomplete
  *****************************************************************************
- * Copyright (C) 2018-2019 x264 project
+ * Copyright (C) 2018-2020 x264 project
  *
  * Authors: Henrik Gramner <henrik@gramner.com>
  *
@@ -27,6 +27,7 @@
 #include "input/input.h"
 
 #if HAVE_LAVF
+#undef DECLARE_ALIGNED
 #include <libavformat/avformat.h>
 #include <libavutil/pixdesc.h>
 #endif
@@ -330,8 +331,8 @@ int x264_cli_autocomplete( const char *prev, const char *cur )
     OPT( "--input-fmt" )
     {
 #if HAVE_LAVF
-        av_register_all();
-        for( const AVInputFormat *f = NULL; (f = av_iformat_next( f )); )
+        void *i = NULL;
+        for( const AVInputFormat *f; (f = av_demuxer_iterate( &i )); )
             suggest_token( f->name, ',' );
 #endif
     }

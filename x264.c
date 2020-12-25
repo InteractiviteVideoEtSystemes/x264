@@ -1,7 +1,7 @@
 /*****************************************************************************
  * x264: top-level x264cli functions
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -65,6 +65,14 @@
 #include <ffms.h>
 #endif
 
+#if HAVE_GPAC
+#include <gpac/version.h>
+#endif
+
+#if HAVE_LSMASH
+#include <lsmash.h>
+#endif
+
 #ifdef _WIN32
 #define CONSOLE_TITLE_SIZE 200
 static wchar_t org_console_title[CONSOLE_TITLE_SIZE] = L"";
@@ -72,42 +80,8 @@ static wchar_t org_console_title[CONSOLE_TITLE_SIZE] = L"";
 void x264_cli_set_console_title( const char *title )
 {
     wchar_t title_utf16[CONSOLE_TITLE_SIZE];
-    if( utf8_to_utf16( title, title_utf16 ) )
+    if( MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, title, -1, title_utf16, CONSOLE_TITLE_SIZE ) )
         SetConsoleTitleW( title_utf16 );
-}
-
-static int utf16_to_ansi( const wchar_t *utf16, char *ansi, int size )
-{
-    int invalid;
-    return WideCharToMultiByte( CP_ACP, WC_NO_BEST_FIT_CHARS, utf16, -1, ansi, size, NULL, &invalid ) && !invalid;
-}
-
-/* Some external libraries doesn't support Unicode in filenames,
- * as a workaround we can try to get an ANSI filename instead. */
-int x264_ansi_filename( const char *filename, char *ansi_filename, int size, int create_file )
-{
-    wchar_t filename_utf16[MAX_PATH];
-    if( utf8_to_utf16( filename, filename_utf16 ) )
-    {
-        if( create_file )
-        {
-            /* Create the file using the Unicode filename if it doesn't already exist. */
-            FILE *fh = _wfopen( filename_utf16, L"ab" );
-            if( fh )
-                fclose( fh );
-        }
-
-        /* Check if the filename already is valid ANSI. */
-        if( utf16_to_ansi( filename_utf16, ansi_filename, size ) )
-            return 1;
-
-        /* Check for a legacy 8.3 short filename. */
-        int short_length = GetShortPathNameW( filename_utf16, filename_utf16, MAX_PATH );
-        if( short_length > 0 && short_length < MAX_PATH )
-            if( utf16_to_ansi( filename_utf16, ansi_filename, size ) )
-                return 1;
-    }
-    return 0;
 }
 
 /* Retrieve command line arguments as UTF-8. */
@@ -288,7 +262,7 @@ static int  parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt );
 static int  encode( x264_param_t *param, cli_opt_t *opt );
 
 /* logging and printing for within the cli system */
-static int cli_log_level;
+static int cli_log_level = X264_LOG_INFO;
 void x264_cli_log( const char *name, int i_level, const char *fmt, ... )
 {
     if( i_level > cli_log_level )
@@ -345,9 +319,17 @@ static void print_version_info( void )
 #if HAVE_FFMS
     printf( "(ffmpegsource %d.%d.%d.%d)\n", FFMS_VERSION >> 24, (FFMS_VERSION & 0xff0000) >> 16, (FFMS_VERSION & 0xff00) >> 8, FFMS_VERSION & 0xff );
 #endif
+#if HAVE_GPAC
+    printf( "(gpac " GPAC_VERSION ")\n" );
+#endif
+#if HAVE_LSMASH
+    printf( "(lsmash %d.%d.%d)\n", LSMASH_VERSION_MAJOR, LSMASH_VERSION_MINOR, LSMASH_VERSION_MICRO );
+#endif
     printf( "built on " __DATE__ ", " );
 #ifdef __INTEL_COMPILER
     printf( "intel: %.2f (%d)\n", __INTEL_COMPILER / 100.f, __INTEL_COMPILER_BUILD_DATE );
+#elif defined(__clang__)
+    printf( "clang: " __clang_version__ "\n" );
 #elif defined(__GNUC__)
     printf( "gcc: " __VERSION__ "\n" );
 #elif defined(_MSC_FULL_VER)
@@ -373,7 +355,7 @@ static void print_version_info( void )
 #endif
 }
 
-static int main_internal( int argc, char **argv )
+REALIGN_STACK int main( int argc, char **argv )
 {
     if( argc == 4 && !strcmp( argv[1], "--autocomplete" ) )
         return x264_cli_autocomplete( argv[2], argv[3] );
@@ -393,6 +375,7 @@ static int main_internal( int argc, char **argv )
     _setmode( _fileno( stderr ), _O_BINARY );
 #endif
 
+    x264_param_default( &param );
     /* Parse command line */
     if( parse( argc, argv, &param, &opt ) < 0 )
         ret = -1;
@@ -419,6 +402,7 @@ static int main_internal( int argc, char **argv )
         fclose( opt.tcfile_out );
     if( opt.qpfile )
         fclose( opt.qpfile );
+    x264_param_cleanup( &param );
 
 #ifdef _WIN32
     SetConsoleTitleW( org_console_title );
@@ -426,11 +410,6 @@ static int main_internal( int argc, char **argv )
 #endif
 
     return ret;
-}
-
-int main( int argc, char **argv )
-{
-    return x264_stack_align( main_internal, argc, argv );
 }
 
 static char const *strtable_lookup( const char * const table[], int idx )
@@ -1417,16 +1396,6 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     char *preset = NULL;
     char *tune = NULL;
 
-    x264_param_default( &defaults );
-    cli_log_level = defaults.i_log_level;
-
-    memset( &input_opt, 0, sizeof(cli_input_opt_t) );
-    memset( &output_opt, 0, sizeof(cli_output_opt_t) );
-    input_opt.bit_depth = 8;
-    input_opt.input_range = input_opt.output_range = param->vui.b_fullrange = RANGE_AUTO;
-    int output_csp = defaults.i_csp;
-    opt->b_progress = 1;
-
     /* Presets are applied before all other options. */
     for( optind = 0;; )
     {
@@ -1444,8 +1413,18 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     if( preset && !strcasecmp( preset, "placebo" ) )
         b_turbo = 0;
 
-    if( x264_param_default_preset( param, preset, tune ) < 0 )
+    if( (preset || tune) && x264_param_default_preset( param, preset, tune ) < 0 )
         return -1;
+
+    x264_param_default( &defaults );
+    cli_log_level = defaults.i_log_level;
+
+    memset( &input_opt, 0, sizeof(cli_input_opt_t) );
+    memset( &output_opt, 0, sizeof(cli_output_opt_t) );
+    input_opt.bit_depth = 8;
+    input_opt.input_range = input_opt.output_range = param->vui.b_fullrange = RANGE_AUTO;
+    int output_csp = defaults.i_csp;
+    opt->b_progress = 1;
 
     /* Parse command line options */
     for( optind = 0;; )
@@ -1671,6 +1650,10 @@ generic_option:
     x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d%c %u:%u @ %u/%u fps (%cfr)\n", info.width,
                   info.height, info.interlaced ? 'i' : 'p', info.sar_width, info.sar_height,
                   info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
+
+    FAIL_IF_ERROR( info.width <= 0 || info.height <= 0 ||
+                   info.width > MAX_RESOLUTION || info.height > MAX_RESOLUTION,
+                   "invalid width x height (%dx%d)\n", info.width, info.height );
 
     if( tcfile_name )
     {

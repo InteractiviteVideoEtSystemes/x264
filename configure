@@ -25,6 +25,9 @@ Configuration options:
   --system-libx264         use system libx264 instead of internal
   --enable-shared          build shared library
   --enable-static          build static library
+  --disable-bashcompletion disable installation of bash-completion script
+  --enable-bashcompletion  force installation of bash-completion script
+  --bashcompletionsdir=DIR install bash-completion script in DIR [auto]
   --disable-opencl         disable OpenCL features
   --disable-gpl            disable GPL-only features
   --disable-thread         disable multithreaded encoding
@@ -128,7 +131,7 @@ cl_ldflags() {
 }
 
 cc_check() {
-    if [ -z "$3" ]; then
+    if [ -z "$3$4" ]; then
         if [ -z "$1$2" ]; then
             log_check "whether $CC works"
         elif [ -z "$1" ]; then
@@ -138,7 +141,11 @@ cc_check() {
         fi
     elif [ -z "$1" ]; then
         if [ -z "$2" ]; then
-            log_check "whether $CC supports $3"
+            if [ -z "$3" ]; then
+                log_check "whether $CC supports $4"
+            else
+                log_check "whether $CC supports $3"
+            fi
         else
             log_check "whether $CC supports $3 with $2"
         fi
@@ -149,11 +156,14 @@ cc_check() {
     for arg in $1; do
         echo "#include <$arg>" >> conftest.c
     done
+    if [ -n "$4" ]; then
+        echo "$4" >> conftest.c
+    fi
     echo "int main (void) { $3 return 0; }" >> conftest.c
     if [ $compiler_style = MS ]; then
-        cc_cmd="$CC conftest.c $(cc_cflags $CFLAGS $CHECK_CFLAGS $2) -link $(cl_ldflags $2 $LDFLAGSCLI $LDFLAGS)"
+        cc_cmd="$CC conftest.c $(cc_cflags $CFLAGS $CFLAGSCLI $CHECK_CFLAGS $2) -link $(cl_ldflags $2 $LDFLAGSCLI $LDFLAGS)"
     else
-        cc_cmd="$CC conftest.c $CFLAGS $CHECK_CFLAGS $2 $LDFLAGSCLI $LDFLAGS -o conftest"
+        cc_cmd="$CC conftest.c $CFLAGS $CFLAGSCLI $CHECK_CFLAGS $2 $LDFLAGSCLI $LDFLAGS -o conftest"
     fi
     if $cc_cmd >conftest.log 2>&1; then
         res=$?
@@ -356,6 +366,8 @@ cli="yes"
 cli_libx264="internal"
 shared="no"
 static="no"
+bashcompletion="auto"
+bashcompletionsdir=""
 avs="auto"
 lavf="auto"
 ffms="auto"
@@ -380,6 +392,8 @@ opencl="yes"
 vsx="auto"
 
 CFLAGS="$CFLAGS -Wall -I. -I\$(SRCPATH)"
+CFLAGSSO="$CFLAGSSO"
+CFLAGSCLI="$CFLAGSCLI"
 LDFLAGS="$LDFLAGS"
 LDFLAGSCLI="$LDFLAGSCLI"
 ASFLAGS="$ASFLAGS -I. -I\$(SRCPATH)"
@@ -394,7 +408,7 @@ NL="
 "
 
 # list of all preprocessor HAVE values we can define
-CONFIG_HAVE="MALLOC_H ALTIVEC ALTIVEC_H MMX ARMV6 ARMV6T2 NEON BEOSTHREAD POSIXTHREAD WIN32THREAD THREAD LOG2F SWSCALE \
+CONFIG_HAVE="MALLOC_H ALTIVEC ALTIVEC_H MMX ARMV6 ARMV6T2 NEON AARCH64 BEOSTHREAD POSIXTHREAD WIN32THREAD THREAD LOG2F SWSCALE \
              LAVF FFMS GPAC AVS GPL VECTOREXT INTERLACED CPU_COUNT OPENCL THP LSMASH X86_INLINE_ASM AS_FUNC INTEL_DISPATCHER \
              MSA MMAP WINRT VSX ARM_INLINE_ASM STRTOK_R CLOCK_GETTIME BITDEPTH8 BITDEPTH10"
 
@@ -429,6 +443,15 @@ for opt do
             ;;
         --enable-static)
             static="yes"
+            ;;
+        --disable-bashcompletion)
+            bashcompletion="no"
+            ;;
+        --enable-bashcompletion)
+            bashcompletion="yes"
+            ;;
+        --bashcompletionsdir=*)
+            bashcompletionsdir="$optarg"
             ;;
         --disable-asm)
             asm="no"
@@ -532,6 +555,7 @@ done
 
 CC="${CC-${cross_prefix}gcc}"
 STRIP="${STRIP-${cross_prefix}strip}"
+STRINGS="${STRINGS-${cross_prefix}strings}"
 INSTALL="${INSTALL-install}"
 PKGCONFIG="${PKGCONFIG-${cross_prefix}pkg-config}"
 
@@ -564,7 +588,7 @@ trap 'rm -rf conftest*' EXIT
 # test for use of compilers that require specific handling
 cc_base="$(basename "$CC")"
 QPRE="-"
-if [[ $host_os = mingw* || $host_os = cygwin* ]]; then
+if [[ $host_os = mingw* || $host_os = msys* || $host_os = cygwin* ]]; then
     if [[ "$cc_base" = icl || "$cc_base" = icl[\ .]* ]]; then
         # Windows Intel Compiler creates dependency generation with absolute Windows paths, Cygwin's make does not support Windows paths.
         [[ $host_os = cygwin* ]] && die "Windows Intel Compiler support requires MSYS"
@@ -610,6 +634,15 @@ fi
 if [ $compiler = GNU ]; then
     if cc_check '' -Werror=unknown-warning-option ; then
         CHECK_CFLAGS="$CHECK_CFLAGS -Werror=unknown-warning-option"
+    fi
+    if cc_check '' -Werror=unknown-attributes ; then
+        CHECK_CFLAGS="$CHECK_CFLAGS -Werror=unknown-attributes"
+    fi
+    if cc_check '' -Werror=attributes ; then
+        CHECK_CFLAGS="$CHECK_CFLAGS -Werror=attributes"
+    fi
+    if cc_check '' -Werror=ignored-attributes ; then
+        CHECK_CFLAGS="$CHECK_CFLAGS -Werror=ignored-attributes"
     fi
 fi
 
@@ -788,6 +821,18 @@ case $host_cpu in
         AS="${AS-${CC}}"
         AS_EXT=".c"
         ;;
+    aarch64|arm64*)
+        ARCH="AARCH64"
+        stack_alignment=16
+        if [ "$SYS" = MACOSX ] ; then
+            AS="${AS-${CC}}"
+            ASFLAGS="$ASFLAGS -DPREFIX -DPIC"
+        elif [ "$SYS" = WINDOWS ] && [ "$compiler" = CL ] ; then
+            AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch aarch64 -as-type armasm -- armasm64 -nologo}"
+        else
+            AS="${AS-${CC}}"
+        fi
+        ;;
     arm*)
         ARCH="ARM"
         if [ "$SYS" = MACOSX ] ; then
@@ -802,18 +847,6 @@ case $host_cpu in
             AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch arm -as-type armasm -force-thumb -- armasm -nologo -ignore 4509}"
         elif [ "$SYS" = WINDOWS ] ; then
             AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch arm -as-type clang -force-thumb -- ${CC} -mimplicit-it=always}"
-        else
-            AS="${AS-${CC}}"
-        fi
-        ;;
-    aarch64)
-        ARCH="AARCH64"
-        stack_alignment=16
-        if [ "$SYS" = MACOSX ] ; then
-            AS="${AS-${CC}}"
-            ASFLAGS="$ASFLAGS -DPREFIX -DPIC"
-        elif [ "$SYS" = WINDOWS ] && [ "$compiler" = CL ] ; then
-            AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch aarch64 -as-type armasm -- armasm64 -nologo}"
         else
             AS="${AS-${CC}}"
         fi
@@ -886,34 +919,36 @@ if [ $shared = yes -a \( $ARCH = "X86_64" -o $ARCH = "PPC" -o $ARCH = "ALPHA" -o
     pic="yes"
 fi
 
-if [ $compiler = GNU -a \( $ARCH = X86 -o $ARCH = X86_64 \) ] ; then
-    if cc_check '' -mpreferred-stack-boundary=6 ; then
-        CFLAGS="$CFLAGS -mpreferred-stack-boundary=6"
-        stack_alignment=64
-    elif cc_check '' -mstack-alignment=64 ; then
-        CFLAGS="$CFLAGS -mstack-alignment=64"
-        stack_alignment=64
-    elif [ $stack_alignment -lt 16 ] ; then
-        if cc_check '' -mpreferred-stack-boundary=4 ; then
-            CFLAGS="$CFLAGS -mpreferred-stack-boundary=4"
-            stack_alignment=16
-        elif cc_check '' -mstack-alignment=16 ; then
-            CFLAGS="$CFLAGS -mstack-alignment=16"
-            stack_alignment=16
+if cc_check '' '' '' '__attribute__((force_align_arg_pointer))' ; then
+    if [ $compiler = GNU -a \( $ARCH = X86 -o $ARCH = X86_64 \) ] ; then
+        if cc_check '' -mpreferred-stack-boundary=6 ; then
+            CFLAGS="$CFLAGS -mpreferred-stack-boundary=6"
+            stack_alignment=64
+        elif cc_check '' -mstack-alignment=64 ; then
+            CFLAGS="$CFLAGS -mstack-alignment=64"
+            stack_alignment=64
+        elif [ $stack_alignment -lt 16 ] ; then
+            if cc_check '' -mpreferred-stack-boundary=4 ; then
+                CFLAGS="$CFLAGS -mpreferred-stack-boundary=4"
+                stack_alignment=16
+            elif cc_check '' -mstack-alignment=16 ; then
+                CFLAGS="$CFLAGS -mstack-alignment=16"
+                stack_alignment=16
+            fi
         fi
-    fi
-elif [ $compiler = ICC -a $ARCH = X86 ]; then
-    # icc on linux has various degrees of mod16 stack support
-    if [ $SYS = LINUX ]; then
-        # >= 12 defaults to a mod16 stack
-        if cpp_check "" "" "__INTEL_COMPILER >= 1200" ; then
-            stack_alignment=16
-        # 11 <= x < 12 is capable of keeping a mod16 stack, but defaults to not doing so.
-        elif cpp_check "" "" "__INTEL_COMPILER >= 1100" ; then
-            CFLAGS="$CFLAGS -falign-stack=assume-16-byte"
-            stack_alignment=16
+    elif [ $compiler = ICC -a $ARCH = X86 ]; then
+        # icc on linux has various degrees of mod16 stack support
+        if [ $SYS = LINUX ]; then
+            # >= 12 defaults to a mod16 stack
+            if cpp_check "" "" "__INTEL_COMPILER >= 1200" ; then
+                stack_alignment=16
+            # 11 <= x < 12 is capable of keeping a mod16 stack, but defaults to not doing so.
+            elif cpp_check "" "" "__INTEL_COMPILER >= 1100" ; then
+                CFLAGS="$CFLAGS -falign-stack=assume-16-byte"
+                stack_alignment=16
+            fi
+            # < 11 is completely incapable of keeping a mod16 stack
         fi
-        # < 11 is completely incapable of keeping a mod16 stack
     fi
 fi
 
@@ -951,8 +986,10 @@ fi
 
 if [ $asm = auto -a $ARCH = AARCH64 ] ; then
     if [ $compiler = CL ] && cpp_check '' '' 'defined(_M_ARM64)' ; then
+        define HAVE_AARCH64
         define HAVE_NEON
     elif cc_check '' '' '__asm__("cmeq v0.8h, v0.8h, #0");' ; then
+        define HAVE_AARCH64
         define HAVE_NEON
         ASFLAGS="$ASFLAGS -c"
     else
@@ -995,10 +1032,10 @@ CPU_ENDIAN="little-endian"
 if [ $compiler = GNU ]; then
     echo "int i[2] = {0x42494745,0}; double f[2] = {0x1.0656e6469616ep+102,0};" > conftest.c
     $CC $CFLAGS conftest.c -c -o conftest.o 2>/dev/null || die "endian test failed"
-    if (${cross_prefix}strings -a conftest.o | grep -q BIGE) && (${cross_prefix}strings -a conftest.o | grep -q FPendian) ; then
+    if (${STRINGS} -a conftest.o | grep -q BIGE) && (${STRINGS} -a conftest.o | grep -q FPendian) ; then
         define WORDS_BIGENDIAN
         CPU_ENDIAN="big-endian"
-    elif !(${cross_prefix}strings -a conftest.o | grep -q EGIB && ${cross_prefix}strings -a conftest.o | grep -q naidnePF) ; then
+    elif !(${STRINGS} -a conftest.o | grep -q EGIB && ${STRINGS} -a conftest.o | grep -q naidnePF) ; then
         die "endian test failed"
     fi
 fi
@@ -1007,6 +1044,7 @@ if [ "$cli_libx264" = "system" -a "$shared" != "yes" ] ; then
     [ "$static" = "yes" ] && die "Option --system-libx264 can not be used together with --enable-static"
     if pkg_check x264 ; then
         X264_LIBS="$($PKGCONFIG --libs x264)"
+        X264_CFLAGS="$($PKGCONFIG --cflags x264)"
         X264_INCLUDE_DIR="${X264_INCLUDE_DIR-$($PKGCONFIG --variable=includedir x264)}"
         configure_system_override "$X264_INCLUDE_DIR" || die "Detection of system libx264 configuration failed"
     else
@@ -1130,7 +1168,7 @@ if [ "$lavf" = "auto" ] ; then
         done
     fi
 
-    if cc_check libavformat/avformat.h "$LAVF_CFLAGS $LAVF_LIBS" "av_register_all();" ; then
+    if cc_check libavformat/avformat.h "$LAVF_CFLAGS $LAVF_LIBS" "av_demuxer_iterate(0);" ; then
         if cc_check libavcodec/avcodec.h "$LAVF_CFLAGS $LAVF_LIBS" "avcodec_send_packet(0,0);" ; then
             lavf="yes"
         else
@@ -1208,15 +1246,16 @@ if [ "$gpac" = "auto" -a "$lsmash" != "yes" ] ; then
     gpac="no"
     GPAC_LIBS="-lgpac_static"
     cc_check "" -lz && GPAC_LIBS="$GPAC_LIBS -lz"
+    cc_check "" -ldl && GPAC_LIBS="$GPAC_LIBS -ldl"
     if [ "$SYS" = "WINDOWS" ] ; then
         cc_check "" -lws2_32 && GPAC_LIBS="$GPAC_LIBS -lws2_32"
         cc_check "" -lwinmm && GPAC_LIBS="$GPAC_LIBS -lwinmm"
     fi
     if cc_check gpac/isomedia.h "$GPAC_LIBS" "gf_isom_close(0);" ; then
-        if cc_check gpac/isomedia.h "$GPAC_LIBS" "gf_isom_set_pixel_aspect_ratio(0,0,0,0,0);" ; then
+        if cc_check gpac/isomedia.h "$GPAC_LIBS" "gf_isom_set_pixel_aspect_ratio(0,0,0,0,0,0);" ; then
             gpac="yes"
         else
-            echo "Warning: gpac is too old, update to 2007-06-21 UTC or later"
+            echo "Warning: gpac is too old, update to v0.8.0 or later"
         fi
     fi
 fi
@@ -1308,6 +1347,10 @@ if cc_check '' -Wmaybe-uninitialized ; then
     CFLAGS="-Wno-maybe-uninitialized $CFLAGS"
 fi
 
+if [ $compiler = GNU ] && cc_check '' -fvisibility=hidden ; then
+    CFLAGS="$CFLAGS -fvisibility=hidden"
+fi
+
 if [ $compiler = ICC -o $compiler = ICL ] ; then
     if cc_check 'extras/intel_dispatcher.h' '' 'x264_intel_dispatcher_override();' ; then
         define HAVE_INTEL_DISPATCHER
@@ -1365,12 +1408,22 @@ EOF
 
 ${SRCPATH}/version.sh >> x264_config.h
 
+if [ "$shared" = "yes" ]; then
+    CFLAGSSO="$CFLAGSSO -DX264_API_EXPORTS"
+fi
+
 if [ "$cli_libx264" = "system" ] ; then
     if [ "$shared" = "yes" ]; then
-        CLI_LIBX264='$(SONAME)'
+        if [ "$SYS" = "WINDOWS" -o "$SYS" = "CYGWIN" ]; then
+            CLI_LIBX264='$(IMPLIBNAME)'
+        else
+            CLI_LIBX264='$(SONAME)'
+        fi
+        CFLAGSCLI="$CFLAGSCLI -DX264_API_IMPORTS"
     else
         CLI_LIBX264=
         LDFLAGSCLI="$X264_LIBS $LDFLAGSCLI"
+        CFLAGSCLI="$CFLAGSCLI $X264_CFLAGS"
         cc_check 'stdint.h x264.h' '' 'x264_encoder_open(0);' || die "System libx264 can't be used for compilation of this version"
     fi
 else
@@ -1409,7 +1462,11 @@ else # gcc/icc
     LIBX264=libx264.a
     [ -n "$RC" ] && RCFLAGS="$RCFLAGS -I. -o "
 fi
-[ $compiler != GNU ] && CFLAGS="$(cc_cflags $CFLAGS)"
+if [ $compiler != GNU ]; then
+    CFLAGS="$(cc_cflags $CFLAGS)"
+    CFLAGSSO="$(cc_cflags $CFLAGSSO)"
+    CFLAGSCLI="$(cc_cflags $CFLAGSCLI)"
+fi
 if [ $compiler = ICC -o $compiler = ICL ]; then
     # icc does not define __SSE__ until SSE2 optimization and icl never defines it or _M_IX86_FP
     [ \( $ARCH = X86_64 -o $ARCH = X86 \) -a $asm = yes ] && ! cpp_check "" "" "defined(__SSE__)" && define __SSE__
@@ -1448,13 +1505,17 @@ SYS_ARCH=$ARCH
 SYS=$SYS
 CC=$CC
 CFLAGS=$CFLAGS
+CFLAGSSO=$CFLAGSSO
+CFLAGSCLI=$CFLAGSCLI
 COMPILER=$compiler
 COMPILER_STYLE=$compiler_style
 DEPMM=$DEPMM
 DEPMT=$DEPMT
 LD=$LD
 LDFLAGS=$LDFLAGS
+LDFLAGSCLI=$LDFLAGSCLI
 LIBX264=$LIBX264
+CLI_LIBX264=$CLI_LIBX264
 AR=$AR
 RANLIB=$RANLIB
 STRIP=$STRIP
@@ -1490,14 +1551,7 @@ if [ "$shared" = "yes" ]; then
         echo "SONAME=libx264-$API.dll" >> config.mak
         if [ $compiler_style = MS ]; then
             echo 'IMPLIBNAME=libx264.dll.lib' >> config.mak
-            # GNU ld on windows defaults to exporting all global functions if there are no explicit __declspec(dllexport) declarations
-            # MSVC link does not act similarly, so it is required to make an export definition out of x264.h and use it at link time
-            echo "SOFLAGS=-dll -def:x264.def -implib:\$(IMPLIBNAME) $SOFLAGS" >> config.mak
-            echo "EXPORTS" > x264.def
-            # export API functions
-            grep "^\(int\|void\|x264_t\).*x264" ${SRCPATH}/x264.h | sed -e "s/.*\(x264.*\)(.*/\1/;s/open/open_$API/g" >> x264.def
-            # export API variables/data. must be flagged with the DATA keyword
-            grep "extern.*x264" ${SRCPATH}/x264.h | sed -e "s/.*\(x264\w*\)\W.*/\1 DATA/;" >> x264.def
+            echo "SOFLAGS=-dll -implib:\$(IMPLIBNAME) $SOFLAGS" >> config.mak
         else
             echo 'IMPLIBNAME=libx264.dll.a' >> config.mak
             echo "SOFLAGS=-shared -Wl,--out-implib,\$(IMPLIBNAME) $SOFLAGS" >> config.mak
@@ -1524,8 +1578,26 @@ if [ "$static" = "yes" ]; then
     echo 'install: install-lib-static' >> config.mak
 fi
 
-echo "LDFLAGSCLI = $LDFLAGSCLI" >> config.mak
-echo "CLI_LIBX264 = $CLI_LIBX264" >> config.mak
+if [ "$bashcompletion" = "auto" ]; then
+    if [ "$cli" = "no" ]; then
+        bashcompletion="no"
+    elif [[ -z "$bashcompletionsdir" && "$prefix" != "/usr" && "$prefix" != "/usr/"* ]]; then
+        bashcompletion="no"
+    fi
+fi
+
+if [ "$bashcompletion" != "no" ]; then
+    if [ -z "$bashcompletionsdir" ] && pkg_check bash-completion ; then
+        bashcompletionsdir="$($PKGCONFIG --variable=completionsdir bash-completion)"
+    fi
+    if [ -n "$bashcompletionsdir" ]; then
+        bashcompletion="yes"
+        echo 'install: install-bashcompletion' >> config.mak
+        echo "BASHCOMPLETIONSDIR=$bashcompletionsdir" >> config.mak
+    else
+        bashcompletion="no"
+    fi
+fi
 
 cat > x264.pc << EOF
 prefix=$prefix
@@ -1535,40 +1607,41 @@ includedir=$includedir
 
 Name: x264
 Description: H.264 (MPEG4 AVC) encoder library
-Version: $(grep POINTVER < x264_config.h | sed -e 's/.* "//; s/".*//')
+Version: $(grep POINTVER < x264_config.h | sed -e 's/.* "//; s/".*//; s/ .*//')
 Libs: -L$libdir -lx264 $([ "$shared" = "yes" ] || echo $libpthread $libm $libdl)
 Libs.private: $([ "$shared" = "yes" ] && echo $libpthread $libm $libdl)
-Cflags: -I$includedir
+Cflags: -I$includedir $([ "$shared" = "yes" ] && echo "-DX264_API_IMPORTS")
 EOF
 
 filters="crop select_every"
 [ $swscale = yes ] && filters="resize $filters"
 
 cat > conftest.log <<EOF
-platform:      $ARCH
-byte order:    $CPU_ENDIAN
-system:        $SYS
-cli:           $cli
-libx264:       $cli_libx264
-shared:        $shared
-static:        $static
-asm:           $asm
-interlaced:    $interlaced
-avs:           $avs
-lavf:          $lavf
-ffms:          $ffms
-mp4:           $mp4
-gpl:           $gpl
-thread:        $thread
-opencl:        $opencl
-filters:       $filters
-lto:           $lto
-debug:         $debug
-gprof:         $gprof
-strip:         $strip
-PIC:           $pic
-bit depth:     $bit_depth
-chroma format: $chroma_format
+platform:       $ARCH
+byte order:     $CPU_ENDIAN
+system:         $SYS
+cli:            $cli
+libx264:        $cli_libx264
+shared:         $shared
+static:         $static
+bashcompletion: $bashcompletion
+asm:            $asm
+interlaced:     $interlaced
+avs:            $avs
+lavf:           $lavf
+ffms:           $ffms
+mp4:            $mp4
+gpl:            $gpl
+thread:         $thread
+opencl:         $opencl
+filters:        $filters
+lto:            $lto
+debug:          $debug
+gprof:          $gprof
+strip:          $strip
+PIC:            $pic
+bit depth:      $bit_depth
+chroma format:  $chroma_format
 EOF
 
 echo >> config.log

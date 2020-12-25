@@ -1,7 +1,7 @@
 /*****************************************************************************
  * mp4.c: mp4 muxer
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -26,10 +26,6 @@
 
 #include "output.h"
 #include <gpac/isomedia.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 typedef struct
 {
@@ -147,7 +143,11 @@ static int close_file( hnd_t handle, int64_t largest_pts, int64_t second_largest
             {
                 uint32_t mvhd_timescale = gf_isom_get_timescale( p_mp4->p_file );
                 uint64_t tkhd_duration = (uint64_t)( mdhd_duration * ( (double)mvhd_timescale / p_mp4->i_time_res ) );
+#if GPAC_VERSION_MAJOR > 8
+                gf_isom_append_edit( p_mp4->p_file, p_mp4->i_track, tkhd_duration, sample->CTS_Offset, GF_ISOM_EDIT_NORMAL );
+#else
                 gf_isom_append_edit_segment( p_mp4->p_file, p_mp4->i_track, tkhd_duration, sample->CTS_Offset, GF_ISOM_EDIT_NORMAL );
+#endif
             }
             gf_isom_sample_del( &sample );
 
@@ -177,15 +177,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, cli_output_opt_t *opt
     if( !p_mp4 )
         return -1;
 
-#ifdef _WIN32
-    /* GPAC doesn't support Unicode filenames. */
-    char ansi_filename[MAX_PATH];
-    FAIL_IF_ERR( !x264_ansi_filename( psz_filename, ansi_filename, MAX_PATH, 1 ), "mp4", "invalid ansi filename\n" );
-    p_mp4->p_file = gf_isom_open( ansi_filename, GF_ISOM_OPEN_WRITE, NULL );
-#else
     p_mp4->p_file = gf_isom_open( psz_filename, GF_ISOM_OPEN_WRITE, NULL );
-#endif
-
     p_mp4->b_dts_compress = opt->use_dts_compress;
 
     if( !(p_mp4->p_sample = gf_isom_sample_new()) )
@@ -233,7 +225,7 @@ static int set_param( hnd_t handle, x264_param_t *p_param )
             dw *= sar;
         else
             dh /= sar;
-        gf_isom_set_pixel_aspect_ratio( p_mp4->p_file, p_mp4->i_track, p_mp4->i_descidx, p_param->vui.i_sar_width, p_param->vui.i_sar_height );
+        gf_isom_set_pixel_aspect_ratio( p_mp4->p_file, p_mp4->i_track, p_mp4->i_descidx, p_param->vui.i_sar_width, p_param->vui.i_sar_height, 0 );
         gf_isom_set_track_layout_info( p_mp4->p_file, p_mp4->i_track, dw, dh, 0, 0, 0 );
     }
 

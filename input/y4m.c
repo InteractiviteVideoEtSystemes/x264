@@ -1,7 +1,7 @@
 /*****************************************************************************
  * y4m.c: y4m input
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -34,8 +34,8 @@ typedef struct
     int next_frame;
     int seq_header_len;
     int frame_header_len;
-    uint64_t frame_size;
-    uint64_t plane_size[3];
+    int64_t frame_size;
+    int64_t plane_size[3];
     int bit_depth;
     cli_mmap_t mmap;
     int use_mmap;
@@ -213,10 +213,10 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
 
     if( x264_is_regular_file( h->fh ) )
     {
-        uint64_t init_pos = ftell( h->fh );
+        int64_t init_pos = ftell( h->fh );
 
         /* Find out the length of the frame header */
-        int len = 1;
+        size_t len = 1;
         while( len <= MAX_FRAME_HEADER && fgetc( h->fh ) != '\n' )
             len++;
         FAIL_IF_ERROR( len > MAX_FRAME_HEADER || len < sizeof(Y4M_FRAME_MAGIC), "bad frame header length\n" );
@@ -224,7 +224,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         h->frame_size += len;
 
         fseek( h->fh, 0, SEEK_END );
-        uint64_t i_size = ftell( h->fh );
+        int64_t i_size = ftell( h->fh );
         fseek( h->fh, init_pos, SEEK_SET );
         info->num_frames = (i_size - h->seq_header_len) / h->frame_size;
         FAIL_IF_ERROR( !info->num_frames, "empty input file\n" );
@@ -277,7 +277,7 @@ static int read_frame_internal( cli_pic_t *pic, y4m_hnd_t *h, int bit_depth_uc )
             if( i )
                 pic->img.plane[i] = pic->img.plane[i-1] + pixel_depth * h->plane_size[i-1];
         }
-        else if( fread( pic->img.plane[i], pixel_depth, h->plane_size[i], h->fh ) != h->plane_size[i] )
+        else if( fread( pic->img.plane[i], pixel_depth, h->plane_size[i], h->fh ) != (uint64_t)h->plane_size[i] )
             return -1;
 
         if( bit_depth_uc )
@@ -285,9 +285,9 @@ static int read_frame_internal( cli_pic_t *pic, y4m_hnd_t *h, int bit_depth_uc )
             /* upconvert non 16bit high depth planes to 16bit using the same
              * algorithm as used in the depth filter. */
             uint16_t *plane = (uint16_t*)pic->img.plane[i];
-            uint64_t pixel_count = h->plane_size[i];
+            int64_t pixel_count = h->plane_size[i];
             int lshift = 16 - h->bit_depth;
-            for( uint64_t j = 0; j < pixel_count; j++ )
+            for( int64_t j = 0; j < pixel_count; j++ )
                 plane[j] = plane[j] << lshift;
         }
     }

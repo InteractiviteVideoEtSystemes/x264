@@ -1,7 +1,7 @@
 /*****************************************************************************
  * opencl.c: OpenCL initialization and kernel compilation
  *****************************************************************************
- * Copyright (C) 2012-2019 x264 project
+ * Copyright (C) 2012-2020 x264 project
  *
  * Authors: Steve Borho <sborho@multicorewareinc.com>
  *          Anton Mitrofanov <BugMaster@narod.ru>
@@ -131,8 +131,11 @@ static cl_program opencl_cache_load( x264_t *h, const char *dev_name, const char
     uint8_t *binary = NULL;
 
     fseek( fp, 0, SEEK_END );
-    size_t size = ftell( fp );
-    rewind( fp );
+    int64_t file_size = ftell( fp );
+    fseek( fp, 0, SEEK_SET );
+    if( file_size < 0 || (uint64_t)file_size > SIZE_MAX )
+        goto fail;
+    size_t size = file_size;
     CHECKED_MALLOC( binary, size );
 
     if( fread( binary, 1, size, fp ) != size )

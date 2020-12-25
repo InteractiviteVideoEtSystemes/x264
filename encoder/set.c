@@ -1,7 +1,7 @@
 /*****************************************************************************
  * set: header writing
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -133,8 +133,6 @@ void x264_sps_init( x264_sps_t *sps, int i_id, x264_param_t *param )
     /* Never set constraint_set2, it is not necessary and not used in real world. */
     sps->b_constraint_set2  = 0;
     sps->b_constraint_set3  = 0;
-    sps->b_constraint_set4  = sps->i_profile_idc >= PROFILE_MAIN && sps->i_profile_idc <= PROFILE_HIGH10 && sps->b_frame_mbs_only;
-    sps->b_constraint_set5  = (sps->i_profile_idc == PROFILE_MAIN || sps->i_profile_idc == PROFILE_HIGH) && param->i_bframe == 0;
 
     sps->i_level_idc = param->i_level_idc;
     if( param->i_level_idc == 9 && ( sps->i_profile_idc == PROFILE_BASELINE || sps->i_profile_idc == PROFILE_MAIN ) )
@@ -311,10 +309,8 @@ void x264_sps_write( bs_t *s, x264_sps_t *sps )
     bs_write1( s, sps->b_constraint_set1 );
     bs_write1( s, sps->b_constraint_set2 );
     bs_write1( s, sps->b_constraint_set3 );
-    bs_write1( s, sps->b_constraint_set4 );
-    bs_write1( s, sps->b_constraint_set5 );
 
-    bs_write( s, 2, 0 );    /* reserved */
+    bs_write( s, 4, 0 );    /* reserved */
 
     bs_write( s, 8, sps->i_level_idc );
 
@@ -598,7 +594,7 @@ int x264_sei_version_write( x264_t *h, bs_t *s )
 
     memcpy( payload, uuid, 16 );
     sprintf( payload+16, "x264 - core %d%s - H.264/MPEG-4 AVC codec - "
-             "Copy%s 2003-2019 - http://www.videolan.org/x264.html - options: %s",
+             "Copy%s 2003-2020 - http://www.videolan.org/x264.html - options: %s",
              X264_BUILD, X264_VERSION, HAVE_GPL?"left":"right", opts );
     length = strlen(payload)+1;
 
@@ -798,7 +794,7 @@ int x264_sei_avcintra_vanc_write( x264_t *h, bs_t *s, int len )
 {
     uint8_t data[6000];
     const char *msg = "VANC";
-    if( len > sizeof(data) )
+    if( len < 0 || (unsigned)len > sizeof(data) )
     {
         x264_log( h, X264_LOG_ERROR, "AVC-Intra SEI is too large (%d)\n", len );
         return -1;

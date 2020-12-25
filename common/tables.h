@@ -1,7 +1,7 @@
 /*****************************************************************************
  * tables.h: const tables
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -33,7 +33,7 @@ typedef struct
     uint8_t i_size;
 } vlc_t;
 
-extern const x264_level_t x264_levels[];
+X264_API extern const x264_level_t x264_levels[];
 
 extern const uint8_t x264_exp2_lut[64];
 extern const float   x264_log2_lut[128];

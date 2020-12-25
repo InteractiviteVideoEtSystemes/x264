@@ -1,7 +1,7 @@
 /*****************************************************************************
  * x264cli.h: x264cli common
  *****************************************************************************
- * Copyright (C) 2003-2019 x264 project
+ * Copyright (C) 2003-2020 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -31,6 +31,8 @@
 
 /* In microseconds */
 #define UPDATE_INTERVAL 250000
+
+#define MAX_RESOLUTION 16384
 
 typedef void *hnd_t;
 
