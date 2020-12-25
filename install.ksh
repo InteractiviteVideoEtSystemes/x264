@@ -49,8 +49,7 @@ function create_rpm
     # we remove the tag locally
     # git tag -d $VERSION
     # we recover latest tags
-    #git fetch --tags
-    #we create a branch from the tag
+    git reset --hard
     #git checkout -b $VERSION $VERSION
     #git status | grep nothing
     echo "Ok"
