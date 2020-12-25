@@ -2,7 +2,7 @@
 
 #Nom du paquetage
 PROJET=x264
-VERSION=0.7.0
+VERSION=0.8.0
 #Repertoire temporaire utiliser pour preparer les packages
 TEMPDIR=/tmp
 
@@ -47,12 +47,13 @@ function create_rpm
     cp ../../${PROJET}.spec ${PROJET}.spec
     cd ../../
     # we remove the tag locally
-    git tag -d $VERSION
+    # git tag -d $VERSION
     # we recover latest tags
-    git fetch --tags
+    #git fetch --tags
     #we create a branch from the tag
-    git checkout -b $VERSION $VERSION
-    git status | grep nothing
+    #git checkout -b $VERSION $VERSION
+    #git status | grep nothing
+    echo "Ok"
     if [ $? == 0 ]
     then
         #Cree le package
@@ -90,11 +91,11 @@ function clean
   	rm -rf gnupg rpmbuild ${PROJET}.rpm ${TEMPDIR}/${PROJET}
 
     #we clean the repo git
-    git checkout master
-    git pull
+    # git checkout master
+    # git pull
   
     #we delete the branch no longer used
-    git branch -D $VERSION
+    #git branch -D $VERSION
 }
 
 case $1 in
