@@ -1,7 +1,7 @@
 /*****************************************************************************
  * asm.S: arm utility macros
  *****************************************************************************
- * Copyright (C) 2008-2020 x264 project
+ * Copyright (C) 2008-2022 x264 project
  *
  * Authors: Mans Rullgard <mans@mansr.com>
  *          David Conrad <lessen42@gmail.com>
@@ -74,7 +74,7 @@
 #   define FUNC @
 #endif
 
-#if SYS_LINUX
+#if SYS_LINUX || SYS_OPENBSD
 #define HAVE_SECTION_DATA_REL_RO 1
 #else
 #define HAVE_SECTION_DATA_REL_RO 0

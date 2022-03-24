@@ -1,7 +1,7 @@
 /*****************************************************************************
  * autocomplete: x264cli shell autocomplete
  *****************************************************************************
- * Copyright (C) 2018-2020 x264 project
+ * Copyright (C) 2018-2022 x264 project
  *
  * Authors: Henrik Gramner <henrik@gramner.com>
  *
@@ -115,6 +115,8 @@ static const char * const opts_nosuggest[] =
     "--ipratio",
     "--keyint", "-I",
     "--lookahead-threads",
+    "--mastering-display",
+    "--cll",
     "--merange",
     "--min-keyint", "-i",
     "--mvrange",

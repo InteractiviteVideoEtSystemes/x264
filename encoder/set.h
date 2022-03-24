@@ -1,7 +1,7 @@
 /*****************************************************************************
  * set.h: header writing
  *****************************************************************************
- * Copyright (C) 2003-2020 x264 project
+ * Copyright (C) 2003-2022 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -53,6 +53,10 @@ void x264_sei_pic_timing_write( x264_t *h, bs_t *s );
 void x264_sei_dec_ref_pic_marking_write( x264_t *h, bs_t *s );
 #define x264_sei_frame_packing_write x264_template(sei_frame_packing_write)
 void x264_sei_frame_packing_write( x264_t *h, bs_t *s );
+#define x264_sei_mastering_display_write x264_template(sei_mastering_display_write)
+void x264_sei_mastering_display_write( x264_t *h, bs_t *s );
+#define x264_sei_content_light_level_write x264_template(sei_content_light_level_write)
+void x264_sei_content_light_level_write( x264_t *h, bs_t *s );
 #define x264_sei_alternative_transfer_write x264_template(sei_alternative_transfer_write)
 void x264_sei_alternative_transfer_write( x264_t *h, bs_t *s );
 #define x264_sei_avcintra_umid_write x264_template(sei_avcintra_umid_write)

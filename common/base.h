@@ -1,7 +1,7 @@
 /*****************************************************************************
  * base.h: misc common functions (bit depth independent)
  *****************************************************************************
- * Copyright (C) 2003-2020 x264 project
+ * Copyright (C) 2003-2022 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -82,7 +82,7 @@ typedef union { x264_uint128_t i; uint64_t q[2]; uint32_t d[4]; uint16_t w[8]; u
 #define MEM_DYN(x, t) (*(t (*)[])(x))
 #else
 //older versions of gcc prefer casting to structure instead of array
-#define MEM_FIX(x, t, s) (*(struct { t a[s]; } (*))(x))
+#define MEM_FIX(x, t, s) (*(struct { t a[s]; } MAY_ALIAS (*))(x))
 //let's set an arbitrary large constant size
 #define MEM_DYN(x, t) MEM_FIX(x, t, 4096)
 #endif
@@ -128,6 +128,8 @@ enum sei_payload_type_e
     SEI_RECOVERY_POINT         = 6,
     SEI_DEC_REF_PIC_MARKING    = 7,
     SEI_FRAME_PACKING          = 45,
+    SEI_MASTERING_DISPLAY      = 137,
+    SEI_CONTENT_LIGHT_LEVEL    = 144,
     SEI_ALTERNATIVE_TRANSFER   = 147,
 };
 
