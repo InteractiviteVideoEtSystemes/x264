@@ -14,4 +14,6 @@ build_x264_x86release.bat
 build_x264_x86debug.bat
 build_x264_x64release.bat
 build_x264_x64debug.bat
+
+Si le fichier .depend existe penser à le supprimer en cas d'erreurs de compilations
    
